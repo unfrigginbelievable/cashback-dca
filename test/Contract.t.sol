@@ -52,11 +52,12 @@ contract ContractTest is Test {
         vm.prank(address(weth));
         weth.transfer(address(this), wethAmount);
         uint256 _transferredWethAmount = weth.balanceOf(address(this));
-        assertEq(_transferredWethAmount, wethAmount);
+        assertEq(_transferredWethAmount, wethAmount, "Weth transfer failed");
 
         // AAVE USES 8 DECIMALS NOW (IDK WHY)
         // ALL RESERVES ARE QUOTED IN USD (IDK WHY)
 
+        console.log("Test contract addr %s", address(this));
         weth.approve(address(bot), wethAmount);
         bot.deposit(wethAmount);
 
@@ -69,15 +70,41 @@ contract ContractTest is Test {
             uint256 _health
         ) = pool.getUserAccountData(address(bot));
 
-        assertEq(bot.depositors(0), address(this));
-        assertEq(bot.usdcAmountOwed(address(this)), _totalCollateral);
-        assertEq(bot.depositsInEth(), wethAmount);
+        assertEq(
+            bot.depositors(0),
+            address(this),
+            "User was not added to depositors list"
+        );
 
-        //1237260000
+        uint256 _expectedBorrowedUSDC = bot.calcNewLoan(
+            _totalCollateral,
+            bot.MAX_BORROW() * 10e13
+        );
+
+        // Determine how much USDC was owed before payout
+        uint256 _totalOwedUsdc = PRBMathUD60x18.mul(
+            wethAmount,
+            oracle.getAssetPrice(address(weth))
+        ) + _expectedBorrowedUSDC;
+
         assertApproxEqRel(
-            usdc.balanceOf(address(bot)) * 100,
-            _totalDebt,
-            0.0001 ether
+            bot.usdcAmountOwed(address(this)) + _expectedBorrowedUSDC,
+            _totalOwedUsdc,
+            0.005 ether,
+            "Owed USDC was not calculated properly"
+        );
+
+        assertEq(
+            bot.depositsInEth(),
+            wethAmount,
+            "Deposited eth does not match"
+        );
+
+        assertApproxEqRel(
+            usdc.balanceOf(address(this)) * 100,
+            _expectedBorrowedUSDC,
+            0.0001 ether,
+            "Borrowed USDC does not match amount sent back to this depositor"
         );
     }
 

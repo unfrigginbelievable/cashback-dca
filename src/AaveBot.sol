@@ -4,14 +4,15 @@ pragma solidity ^0.8.0;
 import "forge-std/console.sol";
 import "./Interfaces/IPool.sol";
 import "./Interfaces/IPriceOracle.sol";
+import "prb-math/contracts/PRBMathUD60x18.sol";
 import "./Interfaces/IPoolAddressesProvider.sol";
 import "openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "prb-math/contracts/PRBMathUD60x18.sol";
+import "lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
 
-contract AaveBot {
+contract AaveBot is IERC4626 {
     uint256 public constant MAX_BORROW = 7500;
     uint256 public constant LTV_BIT_MASK = 65535;
 
@@ -36,13 +37,14 @@ contract AaveBot {
     }
 
     function deposit(uint256 _wethAmount) external {
+        console.log("Depositor %s", msg.sender);
+
         if (_wethAmount == 0) {
             revert Strategy__DepositIsZero();
         }
 
         uint256 _preTransferAmount = weth.balanceOf(address(this));
         weth.transferFrom(msg.sender, address(this), _wethAmount);
-
         if (weth.balanceOf(address(this)) != _preTransferAmount + _wethAmount) {
             revert Strategy__WethTransferFailed();
         }
@@ -54,6 +56,7 @@ contract AaveBot {
 
         depositors.push(msg.sender);
         usdcAmountOwed[msg.sender] += _amountAsUsdc;
+        console.log("USDC amount owed: %s", _amountAsUsdc);
 
         main();
     }
@@ -116,8 +119,18 @@ contract AaveBot {
                 );
 
                 pool.borrow(address(usdc), _newLoan, 1, 0, address(this));
+                uint256 _payoutPool = usdc.balanceOf(address(this));
+                // TODO: Make this actually the share %
+                uint256 sharePecentage = 1 ether;
 
-                // TODO: Pay out each depositor their usdc, scaled by thier vault share %
+                for (uint256 i = 0; i < depositors.length; i++) {
+                    uint256 _depositorPayout = min(
+                        usdcAmountOwed[depositors[i]],
+                        PRBMathUD60x18.mul(_payoutPool, 1 ether)
+                    );
+                    usdcAmountOwed[depositors[i]] -= _depositorPayout;
+                    usdc.transfer(depositors[i], _depositorPayout);
+                }
                 console.log("================GOT HERE=================");
             }
         }
@@ -165,5 +178,9 @@ contract AaveBot {
         returns (uint256)
     {
         return PRBMathUD60x18.mul(_deposits, _loanPercentage);
+    }
+
+    function min(uint256 a, uint256 b) public pure returns (uint256) {
+        return a <= b ? a : b;
     }
 }
