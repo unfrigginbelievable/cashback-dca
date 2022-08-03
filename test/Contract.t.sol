@@ -48,15 +48,17 @@ contract ContractTest is Test {
             PRBMathUD60x18.mul(_ethPrice, wethAmount)
         );
 
-        // Simulate eth deposit to bot
+        // Eth deposit to bot
         vm.prank(address(weth));
-        weth.transfer(address(bot), wethAmount);
-        uint256 _transferredWethAmount = weth.balanceOf(address(bot));
+        weth.transfer(address(this), wethAmount);
+        uint256 _transferredWethAmount = weth.balanceOf(address(this));
         assertEq(_transferredWethAmount, wethAmount);
 
         // AAVE USES 8 DECIMALS NOW (IDK WHY)
         // ALL RESERVES ARE QUOTED IN USD (IDK WHY)
-        bot.main();
+
+        weth.approve(address(bot), wethAmount);
+        bot.deposit(wethAmount);
 
         (
             uint256 _totalCollateral,
@@ -67,8 +69,16 @@ contract ContractTest is Test {
             uint256 _health
         ) = pool.getUserAccountData(address(bot));
 
+        assertEq(bot.depositors(0), address(this));
+        assertEq(bot.usdcAmountOwed(address(this)), _totalCollateral);
         assertEq(bot.depositsInEth(), wethAmount);
-        assertEq(usdc.balanceOf(address(bot)), 1237260000);
+
+        //1237260000
+        assertApproxEqRel(
+            usdc.balanceOf(address(bot)) * 100,
+            _totalDebt,
+            0.0001 ether
+        );
     }
 
     function test_ExtractReserveMap() public {

@@ -8,9 +8,15 @@ import "./Interfaces/IPoolAddressesProvider.sol";
 import "openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
 
+error Strategy__DepositIsZero();
+error Strategy__WethTransferFailed();
+
 contract AaveBot {
-    uint256 public constant LTV_BIT_MASK = 65535;
     uint256 public constant MAX_BORROW = 7500;
+    uint256 public constant LTV_BIT_MASK = 65535;
+
+    address[] public depositors;
+    mapping(address => uint256) public usdcAmountOwed;
 
     IERC20 public immutable weth;
     IERC20 public immutable usdc;
@@ -29,61 +35,95 @@ contract AaveBot {
         usdc = IERC20(_usdc_addr);
     }
 
-    function deposit() external {}
+    function deposit(uint256 _wethAmount) external {
+        if (_wethAmount == 0) {
+            revert Strategy__DepositIsZero();
+        }
 
-    function main() external {
+        uint256 _preTransferAmount = weth.balanceOf(address(this));
+        weth.transferFrom(msg.sender, address(this), _wethAmount);
+
+        if (weth.balanceOf(address(this)) != _preTransferAmount + _wethAmount) {
+            revert Strategy__WethTransferFailed();
+        }
+
+        uint256 _amountAsUsdc = PRBMathUD60x18.mul(
+            _wethAmount,
+            oracle.getAssetPrice(address(weth))
+        );
+
+        depositors.push(msg.sender);
+        usdcAmountOwed[msg.sender] += _amountAsUsdc;
+
+        main();
+    }
+
+    function main() public {
         /*
             TODOS
             -----
-            [] Deposit any available WETH to aave
-            [] Check if debt is in weth and can be converted back to stables
-            [] Take out a loan to available limit
+            [x] Deposit any available WETH to aave
+                [] Check if debt is in weth and can be converted back to stables
+                [x] Take out a loan to available limit
             [] Get contract health
             [] Convert debt to WETH if health is low
-                [] need to flashloan to pay debt, turn off emode, eth loan to repay flashloan
+                [] need to flashloan to pay debt, eth loan to repay flashloan
         */
+        (
+            uint256 _totalCollateral,
+            uint256 _totalDebt,
+            uint256 _availableBorrows,
+            ,
+            ,
+            uint256 _health
+        ) = pool.getUserAccountData(address(this));
+
         uint256 _wethBalance = weth.balanceOf(address(this));
 
-        console.log("Contract bal %s", _wethBalance);
+        console.log("Contract eth bal %s", _wethBalance);
 
         if (_wethBalance >= 0.00001 ether) {
             weth.approve(address(pool), _wethBalance);
             pool.deposit(address(weth), _wethBalance, address(this), 0);
 
             (
-                uint256 _totalCollateral,
-                uint256 _totalDebt,
-                uint256 _availableBorrows,
+                _totalCollateral,
+                _totalDebt,
+                _availableBorrows,
                 ,
                 ,
-                uint256 _health
+                _health
             ) = pool.getUserAccountData(address(this));
 
             if (_health >= 1.05 ether) {
-                /* 
-                    new loan amount in eth = (totalDeposit * maxBorrowPercent) - existing_loans
-                */
-                (
-                    uint256 _loanMaxPercent,
-                    uint256 _liqThreshold
-                ) = getLoanThresholds(address(weth));
-
+                // TODO: Check if debt is in WETH and covert back to usdc
+                /*
+                 * new loan amount = (totalDeposit * maxBorrowPercent) - existingLoans
+                 *
+                 * Borrows must be requested in the borrowed asset's decimals.
+                 * MAX_BORROW * 10e11 gives correct precision for USDC.
+                 */
                 uint256 _newLoan = calcNewLoan(
                     _totalCollateral,
                     MAX_BORROW * 10e11
                 );
 
                 console.log(
-                    "Available Borrows USD %s, Available Borrows ETH %s, New Loans: %s",
+                    "Total depoists USD %s, Available Borrows USD %s, New Loan USD: %s",
+                    _totalCollateral,
                     _availableBorrows,
-                    _priceToEth(_availableBorrows),
                     _newLoan
                 );
 
                 pool.borrow(address(usdc), _newLoan, 1, 0, address(this));
 
+                // TODO: Pay out each depositor their usdc, scaled by thier vault share %
                 console.log("================GOT HERE=================");
             }
+        }
+
+        if (_health <= 1.01 ether) {
+            // TODO: Covert borrows to weth
         }
     }
 
@@ -99,7 +139,7 @@ contract AaveBot {
         return _priceToEth(_totalCollateral);
     }
 
-    function _priceToEth(uint256 _priceInUsd) internal view returns (uint256) {
+    function _priceToEth(uint256 _priceInUsd) public view returns (uint256) {
         return
             PRBMathUD60x18.div(
                 _priceInUsd,
