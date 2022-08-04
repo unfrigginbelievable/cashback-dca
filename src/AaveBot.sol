@@ -2,17 +2,21 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/console.sol";
+import "./AaveVault.sol";
 import "./Interfaces/IPool.sol";
 import "./Interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
 import "./Interfaces/IPoolAddressesProvider.sol";
+import "openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
+import "openzeppelin/contracts/interfaces/IERC4626.sol";
+import "openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import "openzeppelin/contracts/utils/math/Math.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
 
-contract AaveBot is IERC4626 {
+contract AaveBot is AaveVault {
     uint256 public constant MAX_BORROW = 7500;
     uint256 public constant LTV_BIT_MASK = 65535;
 
@@ -25,15 +29,17 @@ contract AaveBot is IERC4626 {
     IPriceOracle public immutable oracle;
 
     constructor(
-        address _pap_addr,
-        address _weth_addr,
-        address _usdc_addr
-    ) {
-        IPoolAddressesProvider _pap = IPoolAddressesProvider(_pap_addr);
+        address _papAddr,
+        address _wethAddr,
+        address _usdcAddr,
+        string memory _name,
+        string memory _symbol
+    ) AaveVault(IERC20Metadata(_wethAddr)) ERC20(_name, _symbol) {
+        IPoolAddressesProvider _pap = IPoolAddressesProvider(_papAddr);
         pool = IPool(_pap.getPool());
         oracle = IPriceOracle(_pap.getPriceOracle());
-        weth = IERC20(_weth_addr);
-        usdc = IERC20(_usdc_addr);
+        weth = IERC20(_wethAddr);
+        usdc = IERC20(_usdcAddr);
     }
 
     function deposit(uint256 _wethAmount) external {
@@ -44,7 +50,8 @@ contract AaveBot is IERC4626 {
         }
 
         uint256 _preTransferAmount = weth.balanceOf(address(this));
-        weth.transferFrom(msg.sender, address(this), _wethAmount);
+        deposit(_wethAmount, msg.sender);
+        // weth.transferFrom(msg.sender, address(this), _wethAmount);
         if (weth.balanceOf(address(this)) != _preTransferAmount + _wethAmount) {
             revert Strategy__WethTransferFailed();
         }
@@ -120,14 +127,18 @@ contract AaveBot is IERC4626 {
 
                 pool.borrow(address(usdc), _newLoan, 1, 0, address(this));
                 uint256 _payoutPool = usdc.balanceOf(address(this));
-                // TODO: Make this actually the share %
-                uint256 sharePecentage = 1 ether;
 
                 for (uint256 i = 0; i < depositors.length; i++) {
-                    uint256 _depositorPayout = min(
-                        usdcAmountOwed[depositors[i]],
-                        PRBMathUD60x18.mul(_payoutPool, 1 ether)
+                    uint256 _sharePercentage = PRBMathUD60x18.div(
+                        this.balanceOf(depositors[i]),
+                        this.totalSupply()
                     );
+
+                    uint256 _depositorPayout = Math.min(
+                        usdcAmountOwed[depositors[i]],
+                        PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
+                    );
+
                     usdcAmountOwed[depositors[i]] -= _depositorPayout;
                     usdc.transfer(depositors[i], _depositorPayout);
                 }
@@ -137,6 +148,7 @@ contract AaveBot is IERC4626 {
 
         if (_health <= 1.01 ether) {
             // TODO: Covert borrows to weth
+            console.log("Start of low health block");
         }
     }
 
@@ -178,9 +190,5 @@ contract AaveBot is IERC4626 {
         returns (uint256)
     {
         return PRBMathUD60x18.mul(_deposits, _loanPercentage);
-    }
-
-    function min(uint256 a, uint256 b) public pure returns (uint256) {
-        return a <= b ? a : b;
     }
 }

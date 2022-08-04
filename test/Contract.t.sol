@@ -10,14 +10,14 @@ import "src/Libraries/DataTypes.sol";
 import "src/AaveBot.sol";
 
 contract ContractTest is Test {
-    AaveBot bot;
-    IERC20 weth;
-    IERC20 usdc;
-    IPool pool;
-    IPriceOracle oracle;
-    uint256 wethAmount = 1 ether;
+    AaveBot public bot;
+    IERC20 public weth;
+    IERC20 public usdc;
+    IPool public pool;
+    IPriceOracle public oracle;
+    uint256 public wethAmount = 1 ether;
 
-    string ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
+    string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
 
     function setUp() public {
         vm.chainId(31337);
@@ -31,11 +31,17 @@ contract ContractTest is Test {
         bot = new AaveBot(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
             address(weth),
-            address(usdc)
+            address(usdc),
+            "aavebot_shares",
+            "ABS"
         );
 
         pool = IPool(bot.pool());
         oracle = IPriceOracle(bot.oracle());
+    }
+
+    function test_Constructor() public {
+        assertEq(bot.asset(), address(weth));
     }
 
     function testDepositToAave() public {
@@ -60,6 +66,12 @@ contract ContractTest is Test {
         console.log("Test contract addr %s", address(this));
         weth.approve(address(bot), wethAmount);
         bot.deposit(wethAmount);
+
+        assertEq(
+            bot.balanceOf(address(this)),
+            wethAmount,
+            "Vault did not mint correct amount of shares"
+        );
 
         (
             uint256 _totalCollateral,

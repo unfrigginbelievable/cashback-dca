@@ -1,4 +1,4 @@
-cache
-lib
-out
-src/test
+cache/*
+lib/*
+out/*
+src/test/*
