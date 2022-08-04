@@ -32,6 +32,7 @@ contract ContractTest is Test {
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
             address(weth),
             address(usdc),
+            0xE592427A0AEce92De3Edee1F18E0157C05861564,
             "aavebot_shares",
             "ABS"
         );

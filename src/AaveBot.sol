@@ -6,13 +6,14 @@ import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
 import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
-import "openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "openzeppelin/contracts/interfaces/IERC4626.sol";
-import "openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import "openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
-import "uniswap/contracts/interfaces/IUniswapV2Router02.sol";
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
@@ -24,6 +25,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
     uint256 public constant MAX_BORROW = 7500;
     uint256 public constant LTV_BIT_MASK = 65535;
+    uint24 public constant uniPoolFee = 3000;
 
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
@@ -33,7 +35,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     IPoolAddressesProvider public immutable pap;
     IPool public immutable pool;
     IPriceOracle public immutable oracle;
-    IUniswapV2Router02 public immutable router;
+    ISwapRouter public immutable router;
 
     constructor(
         address _papAddr,
@@ -48,7 +50,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         oracle = IPriceOracle(pap.getPriceOracle());
         weth = IERC20(_wethAddr);
         usdc = IERC20(_usdcAddr);
-        router = IUniswapV2Router02(_uniswapRouterAddr);
+        router = ISwapRouter(_uniswapRouterAddr);
         _asset = IERC20Metadata(_wethAddr);
     }
 
@@ -524,5 +526,35 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
     function POOL() external view returns (IPool) {
         return pool;
+    }
+
+    /* ================================================================
+     * ========================= UNISWAP FUNCTIONS ==================
+     * ================================================================
+     */
+    function swapETHForUSDC(uint256 _usdcAmount) internal {
+        uint256 _wethAmount = weth.balanceOf(address(this));
+
+        TransferHelper.safeApprove(address(weth), address(router), _usdcAmount);
+
+        ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter
+            .ExactOutputSingleParams({
+                tokenIn: address(weth),
+                tokenOut: address(usdc),
+                fee: uniPoolFee,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountInMaximum: _wethAmount,
+                amountOut: _usdcAmount,
+                sqrtPriceLimitX96: 0
+            });
+
+        uint256 amountIn = router.exactOutputSingle(params);
+
+        if (amountIn < _wethAmount) {
+            uint256 _leftOver = _wethAmount - amountIn;
+            weth.approve(address(pool), _leftOver);
+            pool.repay(address(this), _leftOver, 1, address(this));
+        }
     }
 }
