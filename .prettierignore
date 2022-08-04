@@ -1,0 +1,17 @@
+node_modules
+artifacts
+cache
+coverage*
+gasReporterOutput.json
+package.json
+img
+.env
+.*
+README.md
+coverage.json
+deployments
+foundry.toml
+remappings.txt
+cache
+out
+lib
