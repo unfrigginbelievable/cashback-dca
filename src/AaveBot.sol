@@ -135,6 +135,18 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         if (_health <= 1.01 ether) {
             // TODO: Covert borrows to weth
             console.log("Start of low health block");
+
+            /*
+             * Converts usdc debt into weth debt.
+             * See executeOperation() below.
+             */
+            pool.flashLoanSimple(
+                address(this),
+                address(usdc),
+                _totalDebt,
+                "",
+                0
+            );
         }
     }
 
@@ -499,8 +511,12 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
          * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
          */
 
+        console.log("In flashloan func!");
+
         // This is how much usdc aave expects back
         uint256 _paybackAmount = amount + premium;
+
+        console.log("Payback amount: %s", _paybackAmount);
 
         // pay back debt
         pool.repay(asset, amount, 1, initiator);
@@ -510,7 +526,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         pool.borrow(address(weth), _newDebt, 1, 0, initiator);
 
         // swap borrowed eth to usdc
-        // TODO: Make a swap function
+        swapETHForUSDC(_paybackAmount);
 
         // Ensure pool can transfer back asset
         usdc.approve(address(pool), _paybackAmount);

@@ -6,6 +6,7 @@ import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
 import "aave/contracts/protocol/libraries/types/DataTypes.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import "src/AaveBot.sol";
 
@@ -15,6 +16,7 @@ contract ContractTest is Test {
     IERC20 public usdc;
     IPool public pool;
     IPriceOracle public oracle;
+    AggregatorV3Interface public chainlink;
     uint256 public wethAmount = 1 ether;
 
     string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
@@ -27,6 +29,10 @@ contract ContractTest is Test {
 
         weth = IERC20(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
         usdc = IERC20(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
+
+        chainlink = AggregatorV3Interface(
+            0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612
+        );
 
         bot = new AaveBot(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
@@ -134,5 +140,22 @@ contract ContractTest is Test {
         uint256 result = bot.calcNewLoan(bot.depositsInEth(), 80 ether);
 
         assertEq(result, PRBMathUD60x18.mul(bot.depositsInEth(), 80 ether));
+    }
+
+    function test_BotRepay() public {
+        // Do I manipulate price at aave oracle or chain link oracle?
+        // Aave pulls directly from chainlink so prob chainlink
+        // Maybe I can use vm.mockCall to change chainlink lastRoundData()?
+        // Maybe I can deploy a mock chainlink interface, use prank to set aave oracle to use my fake oracle?
+        vm.mockCall(
+            address(chainlink),
+            abi.encodeWithSelector(chainlink.latestRoundData.selector),
+            abi.encode(0, 150000000000, block.timestamp, block.timestamp, 0)
+        );
+
+        // (, int256 result, , , ) = chainlink.latestRoundData();
+        uint256 result = oracle.getAssetPrice(address(weth));
+
+        assertEq(result, uint256(150000000000));
     }
 }
