@@ -65,7 +65,7 @@ contract ContractTest is Test {
 
         console.log("Test contract addr %s", address(this));
         weth.approve(address(bot), wethAmount);
-        bot.deposit(wethAmount);
+        bot.deposit(wethAmount, address(this));
 
         assertEq(
             bot.balanceOf(address(this)),
