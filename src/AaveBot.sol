@@ -47,34 +47,6 @@ contract AaveBot is IERC4626, ERC20 {
         _asset = IERC20Metadata(_wethAddr);
     }
 
-    /*
-    function deposit(uint256 _wethAmount) external {
-        console.log("Depositor %s", msg.sender);
-
-        if (_wethAmount == 0) {
-            revert Strategy__DepositIsZero();
-        }
-
-        uint256 _preTransferAmount = weth.balanceOf(address(this));
-        deposit(_wethAmount, msg.sender);
-        // weth.transferFrom(msg.sender, address(this), _wethAmount);
-        if (weth.balanceOf(address(this)) != _preTransferAmount + _wethAmount) {
-            revert Strategy__WethTransferFailed();
-        }
-
-        uint256 _amountAsUsdc = PRBMathUD60x18.mul(
-            _wethAmount,
-            oracle.getAssetPrice(address(weth))
-        );
-
-        depositors.push(msg.sender);
-        usdcAmountOwed[msg.sender] += _amountAsUsdc;
-        console.log("USDC amount owed: %s", _amountAsUsdc);
-
-        main();
-    }
-    */
-
     function main() public {
         /*
             TODOS
@@ -211,11 +183,13 @@ contract AaveBot is IERC4626, ERC20 {
     }
 
     /** @dev See {IERC4262-totalAssets}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function totalAssets() public view virtual override returns (uint256) {
         return _asset.balanceOf(address(this));
     }
 
     /** @dev See {IERC4262-convertToShares}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function convertToShares(uint256 assets)
         public
         view
@@ -226,7 +200,7 @@ contract AaveBot is IERC4626, ERC20 {
         return _convertToShares(assets, Math.Rounding.Down);
     }
 
-    /** @dev See {IERC4262-convertToAssets}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function convertToAssets(uint256 shares)
         public
         view
@@ -276,6 +250,7 @@ contract AaveBot is IERC4626, ERC20 {
     }
 
     /** @dev See {IERC4262-previewDeposit}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function previewDeposit(uint256 assets)
         public
         view
@@ -287,6 +262,7 @@ contract AaveBot is IERC4626, ERC20 {
     }
 
     /** @dev See {IERC4262-previewMint}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function previewMint(uint256 shares)
         public
         view
@@ -298,6 +274,7 @@ contract AaveBot is IERC4626, ERC20 {
     }
 
     /** @dev See {IERC4262-previewWithdraw}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function previewWithdraw(uint256 assets)
         public
         view
@@ -309,6 +286,7 @@ contract AaveBot is IERC4626, ERC20 {
     }
 
     /** @dev See {IERC4262-previewRedeem}. */
+    // TODO: Does this work if assets = totalCollateral - totalDebt?
     function previewRedeem(uint256 shares)
         public
         view
@@ -331,32 +309,8 @@ contract AaveBot is IERC4626, ERC20 {
             "ERC4626: deposit more than max"
         );
 
-        console.log("Depositor %s", msg.sender);
-
-        if (assets == 0) {
-            revert Strategy__DepositIsZero();
-        }
-
-        uint256 _preTransferAmount = weth.balanceOf(address(this));
-
         uint256 shares = previewDeposit(assets);
         _deposit(_msgSender(), receiver, assets, shares);
-
-        // weth.transferFrom(msg.sender, address(this), assets);
-        if (weth.balanceOf(address(this)) != _preTransferAmount + assets) {
-            revert Strategy__WethTransferFailed();
-        }
-
-        uint256 _amountAsUsdc = PRBMathUD60x18.mul(
-            assets,
-            oracle.getAssetPrice(address(weth))
-        );
-
-        depositors.push(msg.sender);
-        usdcAmountOwed[msg.sender] += _amountAsUsdc;
-        console.log("USDC amount owed: %s", _amountAsUsdc);
-
-        main();
 
         return shares;
     }
@@ -458,8 +412,33 @@ contract AaveBot is IERC4626, ERC20 {
         // Conclusion: we need to do the transfer before we mint so that any reentrancy would happen before the
         // assets are transfered and before the shares are minted, which is a valid state.
         // slither-disable-next-line reentrancy-no-eth
+        console.log("Depositor %s", msg.sender);
+
+        if (assets == 0) {
+            revert Strategy__DepositIsZero();
+        }
+
+        uint256 _preTransferAmount = weth.balanceOf(address(this));
+
         SafeERC20.safeTransferFrom(_asset, caller, address(this), assets);
+
+        // weth.transferFrom(msg.sender, address(this), assets);
+        if (weth.balanceOf(address(this)) != _preTransferAmount + assets) {
+            revert Strategy__WethTransferFailed();
+        }
+
         _mint(receiver, shares);
+
+        uint256 _amountAsUsdc = PRBMathUD60x18.mul(
+            assets,
+            oracle.getAssetPrice(address(weth))
+        );
+
+        depositors.push(msg.sender);
+        usdcAmountOwed[msg.sender] += _amountAsUsdc;
+        console.log("USDC amount owed: %s", _amountAsUsdc);
+
+        main();
 
         emit Deposit(caller, receiver, assets, shares);
     }
