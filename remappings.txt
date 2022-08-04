@@ -2,3 +2,4 @@ debtswap/=lib/debtswap/
 prb-math/=lib/prb-math/
 openzeppelin/=lib/openzeppelin-contracts/
 aave/=lib/aave-v3-core/
+uniswap/=lib/v2-periphery/

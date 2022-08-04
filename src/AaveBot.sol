@@ -29,7 +29,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
     IERC20 public immutable weth;
     IERC20 public immutable usdc;
-    IPoolAddressesProvider pap;
+    IPoolAddressesProvider public immutable pap;
     IPool public immutable pool;
     IPriceOracle public immutable oracle;
 
