@@ -2,20 +2,21 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/console.sol";
-import "./Interfaces/IPool.sol";
-import "./Interfaces/IPriceOracle.sol";
+import "aave/contracts/interfaces/IPool.sol";
+import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
-import "./Interfaces/IPoolAddressesProvider.sol";
+import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
 import "openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin/contracts/interfaces/IERC4626.sol";
 import "openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "openzeppelin/contracts/utils/math/Math.sol";
+import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
 
-contract AaveBot is IERC4626, ERC20 {
+contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     using Math for uint256;
 
     IERC20Metadata private immutable _asset;
@@ -28,6 +29,7 @@ contract AaveBot is IERC4626, ERC20 {
 
     IERC20 public immutable weth;
     IERC20 public immutable usdc;
+    IPoolAddressesProvider pap;
     IPool public immutable pool;
     IPriceOracle public immutable oracle;
 
@@ -38,9 +40,9 @@ contract AaveBot is IERC4626, ERC20 {
         string memory _name,
         string memory _symbol
     ) ERC20(_name, _symbol) {
-        IPoolAddressesProvider _pap = IPoolAddressesProvider(_papAddr);
-        pool = IPool(_pap.getPool());
-        oracle = IPriceOracle(_pap.getPriceOracle());
+        pap = IPoolAddressesProvider(_papAddr);
+        pool = IPool(pap.getPool());
+        oracle = IPriceOracle(pap.getPriceOracle());
         weth = IERC20(_wethAddr);
         usdc = IERC20(_usdcAddr);
         _asset = IERC20Metadata(_wethAddr);
@@ -470,5 +472,53 @@ contract AaveBot is IERC4626, ERC20 {
 
     function _isVaultCollateralized() private view returns (bool) {
         return totalAssets() > 0 || totalSupply() == 0;
+    }
+
+    /* ================================================================
+     * ========================= FLASHLOAN FUNCTIONS ==================
+     * ================================================================
+     */
+
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external returns (bool) {
+        /*
+         * Flow:
+         * FlashLoan usdc to pay back debt
+         * Take out new debt in ETH, ensure eth value = _paybackAmount
+         * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
+         */
+
+        // This is how much usdc aave expects back
+        uint256 _paybackAmount = amount + premium;
+
+        // pay back debt
+        pool.repay(asset, amount, 1, initiator);
+
+        // take out new debt in eth
+        uint256 _newDebt = _priceToEth(_paybackAmount);
+        pool.borrow(address(weth), _newDebt, 1, 0, initiator);
+
+        // swap borrowed eth to usdc
+        // TODO: Make a swap function
+
+        // Ensure pool can transfer back asset
+        usdc.approve(address(pool), _paybackAmount);
+    }
+
+    function ADDRESSES_PROVIDER()
+        external
+        view
+        returns (IPoolAddressesProvider)
+    {
+        return pap;
+    }
+
+    function POOL() external view returns (IPool) {
+        return pool;
     }
 }

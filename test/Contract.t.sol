@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
-import "src/Interfaces/IPool.sol";
-import "src/Interfaces/IPriceOracle.sol";
+import "aave/contracts/interfaces/IPool.sol";
+import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
-import "src/Libraries/DataTypes.sol";
+import "aave/contracts/protocol/libraries/types/DataTypes.sol";
 
 import "src/AaveBot.sol";
 
