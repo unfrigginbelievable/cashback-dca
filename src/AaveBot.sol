@@ -12,6 +12,7 @@ import "openzeppelin/contracts/interfaces/IERC4626.sol";
 import "openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
+import "uniswap/contracts/interfaces/IUniswapV2Router02.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
@@ -32,11 +33,13 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     IPoolAddressesProvider public immutable pap;
     IPool public immutable pool;
     IPriceOracle public immutable oracle;
+    IUniswapV2Router02 public immutable router;
 
     constructor(
         address _papAddr,
         address _wethAddr,
         address _usdcAddr,
+        address _uniswapRouterAddr,
         string memory _name,
         string memory _symbol
     ) ERC20(_name, _symbol) {
@@ -45,6 +48,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         oracle = IPriceOracle(pap.getPriceOracle());
         weth = IERC20(_wethAddr);
         usdc = IERC20(_usdcAddr);
+        router = IUniswapV2Router02(_uniswapRouterAddr);
         _asset = IERC20Metadata(_wethAddr);
     }
 
