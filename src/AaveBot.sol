@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/console.sol";
-import "./AaveVault.sol";
 import "./Interfaces/IPool.sol";
 import "./Interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
