@@ -144,8 +144,9 @@ contract AaveBot is AaveHelper, IERC4626, ERC20, IFlashLoanSimpleReceiver {
     }
 
     function _priceToEth(uint256 _priceInUsd) public view returns (uint256) {
-        return PRBMathUD60x18.div(_priceInUsd, oracle.getAssetPrice(address(weth)));
-        // return Math.mulDiv(_priceInUsd, oracle.getAssetPrice(address(weth)), 1e8);
+        uint256 _oraclePrice = oracle.getAssetPrice(address(weth));
+        uint256 _result = PRBMathUD60x18.div(_priceInUsd, _oraclePrice);
+        return _result;
     }
 
     function getLoanThresholds(address _asset) public view returns (uint256, uint256) {
