@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/console.sol";
+import "./AaveHelper.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
@@ -12,20 +13,17 @@ import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
-import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
 
-contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
+contract AaveBot is AaveHelper, IERC4626, ERC20, IFlashLoanSimpleReceiver {
     using Math for uint256;
 
     IERC20Metadata private immutable _asset;
 
     uint256 public constant MAX_BORROW = 7500;
     uint256 public constant LTV_BIT_MASK = 65535;
-    uint24 public constant uniPoolFee = 3000;
 
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
@@ -82,14 +80,8 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
             weth.approve(address(pool), _wethBalance);
             pool.deposit(address(weth), _wethBalance, address(this), 0);
 
-            (
-                _totalCollateral,
-                _totalDebt,
-                _availableBorrows,
-                ,
-                ,
-                _health
-            ) = pool.getUserAccountData(address(this));
+            (_totalCollateral, _totalDebt, _availableBorrows, , , _health) = pool
+                .getUserAccountData(address(this));
 
             if (_health >= 1.05 ether) {
                 // TODO: Check if debt is in WETH and covert back to usdc
@@ -99,10 +91,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
                  * Borrows must be requested in the borrowed asset's decimals.
                  * MAX_BORROW * 10e11 gives correct precision for USDC.
                  */
-                uint256 _newLoan = calcNewLoan(
-                    _totalCollateral,
-                    MAX_BORROW * 10e11
-                );
+                uint256 _newLoan = calcNewLoan(_totalCollateral, MAX_BORROW * 10e11);
 
                 console.log(
                     "Total depoists USD %s, Available Borrows USD %s, New Loan USD: %s",
@@ -140,13 +129,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
              */
-            pool.flashLoanSimple(
-                address(this),
-                address(usdc),
-                _totalDebt,
-                "",
-                0
-            );
+            pool.flashLoanSimple(address(this), address(usdc), _totalDebt, "", 0);
         }
     }
 
@@ -156,25 +139,16 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     }
 
     function depositsInEth() public view returns (uint256) {
-        (uint256 _totalCollateral, , , , , ) = pool.getUserAccountData(
-            address(this)
-        );
+        (uint256 _totalCollateral, , , , , ) = pool.getUserAccountData(address(this));
         return _priceToEth(_totalCollateral);
     }
 
     function _priceToEth(uint256 _priceInUsd) public view returns (uint256) {
-        return
-            PRBMathUD60x18.div(
-                _priceInUsd,
-                oracle.getAssetPrice(address(weth))
-            );
+        return PRBMathUD60x18.div(_priceInUsd, oracle.getAssetPrice(address(weth)));
+        // return Math.mulDiv(_priceInUsd, oracle.getAssetPrice(address(weth)), 1e8);
     }
 
-    function getLoanThresholds(address _asset)
-        public
-        view
-        returns (uint256, uint256)
-    {
+    function getLoanThresholds(address _asset) public view returns (uint256, uint256) {
         uint256 bits = pool.getReserveData(_asset).configuration.data;
         uint256 ltv = bits & LTV_BIT_MASK;
         uint256 liqThresh = (bits >> 16) & LTV_BIT_MASK;
@@ -182,11 +156,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         return (ltv, liqThresh);
     }
 
-    function calcNewLoan(uint256 _deposits, uint256 _loanPercentage)
-        public
-        pure
-        returns (uint256)
-    {
+    function calcNewLoan(uint256 _deposits, uint256 _loanPercentage) public pure returns (uint256) {
         return PRBMathUD60x18.mul(_deposits, _loanPercentage);
     }
 
@@ -209,35 +179,17 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
     /** @dev See {IERC4262-convertToShares}. */
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function convertToShares(uint256 assets)
-        public
-        view
-        virtual
-        override
-        returns (uint256 shares)
-    {
+    function convertToShares(uint256 assets) public view virtual override returns (uint256 shares) {
         return _convertToShares(assets, Math.Rounding.Down);
     }
 
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function convertToAssets(uint256 shares)
-        public
-        view
-        virtual
-        override
-        returns (uint256 assets)
-    {
+    function convertToAssets(uint256 shares) public view virtual override returns (uint256 assets) {
         return _convertToAssets(shares, Math.Rounding.Down);
     }
 
     /** @dev See {IERC4262-maxDeposit}. */
-    function maxDeposit(address)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function maxDeposit(address) public view virtual override returns (uint256) {
         return _isVaultCollateralized() ? type(uint256).max : 0;
     }
 
@@ -247,86 +199,42 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     }
 
     /** @dev See {IERC4262-maxWithdraw}. */
-    function maxWithdraw(address owner)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function maxWithdraw(address owner) public view virtual override returns (uint256) {
         return _convertToAssets(balanceOf(owner), Math.Rounding.Down);
     }
 
     /** @dev See {IERC4262-maxRedeem}. */
-    function maxRedeem(address owner)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function maxRedeem(address owner) public view virtual override returns (uint256) {
         return balanceOf(owner);
     }
 
     /** @dev See {IERC4262-previewDeposit}. */
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function previewDeposit(uint256 assets)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function previewDeposit(uint256 assets) public view virtual override returns (uint256) {
         return _convertToShares(assets, Math.Rounding.Down);
     }
 
     /** @dev See {IERC4262-previewMint}. */
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function previewMint(uint256 shares)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function previewMint(uint256 shares) public view virtual override returns (uint256) {
         return _convertToAssets(shares, Math.Rounding.Up);
     }
 
     /** @dev See {IERC4262-previewWithdraw}. */
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function previewWithdraw(uint256 assets)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function previewWithdraw(uint256 assets) public view virtual override returns (uint256) {
         return _convertToShares(assets, Math.Rounding.Up);
     }
 
     /** @dev See {IERC4262-previewRedeem}. */
     // TODO: Does this work if assets = totalCollateral - totalDebt?
-    function previewRedeem(uint256 shares)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
+    function previewRedeem(uint256 shares) public view virtual override returns (uint256) {
         return _convertToAssets(shares, Math.Rounding.Down);
     }
 
     /** @dev See {IERC4262-deposit}. */
-    function deposit(uint256 assets, address receiver)
-        public
-        virtual
-        override
-        returns (uint256)
-    {
-        require(
-            assets <= maxDeposit(receiver),
-            "ERC4626: deposit more than max"
-        );
+    function deposit(uint256 assets, address receiver) public virtual override returns (uint256) {
+        require(assets <= maxDeposit(receiver), "ERC4626: deposit more than max");
 
         uint256 shares = previewDeposit(assets);
         _deposit(_msgSender(), receiver, assets, shares);
@@ -335,12 +243,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
     }
 
     /** @dev See {IERC4262-mint}. */
-    function mint(uint256 shares, address receiver)
-        public
-        virtual
-        override
-        returns (uint256)
-    {
+    function mint(uint256 shares, address receiver) public virtual override returns (uint256) {
         require(shares <= maxMint(receiver), "ERC4626: mint more than max");
 
         uint256 assets = previewMint(shares);
@@ -355,10 +258,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         address receiver,
         address owner
     ) public virtual override returns (uint256) {
-        require(
-            assets <= maxWithdraw(owner),
-            "ERC4626: withdraw more than max"
-        );
+        require(assets <= maxWithdraw(owner), "ERC4626: withdraw more than max");
 
         uint256 shares = previewWithdraw(assets);
         _withdraw(_msgSender(), receiver, owner, assets, shares);
@@ -448,10 +348,7 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
         _mint(receiver, shares);
 
-        uint256 _amountAsUsdc = PRBMathUD60x18.mul(
-            assets,
-            oracle.getAssetPrice(address(weth))
-        );
+        uint256 _amountAsUsdc = PRBMathUD60x18.mul(assets, oracle.getAssetPrice(address(weth)));
 
         depositors.push(msg.sender);
         usdcAmountOwed[msg.sender] += _amountAsUsdc;
@@ -513,8 +410,9 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
 
         console.log("In flashloan func!");
 
-        // This is how much usdc aave expects back
-        uint256 _paybackAmount = amount + premium;
+        // This is how much usdc aave expects back + uniswap fee
+        uint256 _uniswapFee = Math.mulDiv(amount, uniPoolFee, feeDenominator);
+        uint256 _paybackAmount = amount + premium + _uniswapFee;
 
         console.log("Payback amount: %s", _paybackAmount);
 
@@ -526,17 +424,19 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
         pool.borrow(address(weth), _newDebt, 1, 0, initiator);
 
         // swap borrowed eth to usdc
-        swapETHForUSDC(_paybackAmount);
+        uint256 _amountIn = swapDebt(weth, usdc, _paybackAmount, router, pool);
 
-        // Ensure pool can transfer back asset
+        if (_amountIn < _paybackAmount) {
+            uint256 _leftOver = _paybackAmount - _amountIn;
+            weth.approve(address(pool), _leftOver);
+            pool.repay(address(weth), _leftOver, 1, address(this));
+        }
+
+        // Ensure pool can transfer back borrowed asset
         usdc.approve(address(pool), _paybackAmount);
     }
 
-    function ADDRESSES_PROVIDER()
-        external
-        view
-        returns (IPoolAddressesProvider)
-    {
+    function ADDRESSES_PROVIDER() external view returns (IPoolAddressesProvider) {
         return pap;
     }
 
@@ -548,29 +448,4 @@ contract AaveBot is IERC4626, ERC20, IFlashLoanSimpleReceiver {
      * ========================= UNISWAP FUNCTIONS ==================
      * ================================================================
      */
-    function swapETHForUSDC(uint256 _usdcAmount) internal {
-        uint256 _wethAmount = weth.balanceOf(address(this));
-
-        TransferHelper.safeApprove(address(weth), address(router), _usdcAmount);
-
-        ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter
-            .ExactOutputSingleParams({
-                tokenIn: address(weth),
-                tokenOut: address(usdc),
-                fee: uniPoolFee,
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountInMaximum: _wethAmount,
-                amountOut: _usdcAmount,
-                sqrtPriceLimitX96: 0
-            });
-
-        uint256 amountIn = router.exactOutputSingle(params);
-
-        if (amountIn < _wethAmount) {
-            uint256 _leftOver = _wethAmount - amountIn;
-            weth.approve(address(pool), _leftOver);
-            pool.repay(address(this), _leftOver, 1, address(this));
-        }
-    }
 }
