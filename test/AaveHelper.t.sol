@@ -45,6 +45,22 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_result.decimals, 18);
     }
 
+    function test_convertToUSDCDecimals() public {
+        DecimalNumber memory _result = convertToUSDCDecimals(
+            DecimalNumber({number: 1 ether, decimals: 18})
+        );
+        assertEq(_result.number, 1 * (1e6));
+        assertEq(_result.decimals, 6);
+    }
+
+    function test_getAssetPrice() public {
+        uint256 _wethPrice = oracle.getAssetPrice(address(weth));
+        DecimalNumber memory _result = getAssetPrice(weth);
+
+        assertEq(_result.number, _wethPrice * (1e10));
+        assertEq(_result.decimals, 18);
+    }
+
     function test_balanceOf() public {
         vm.prank(address(weth));
         weth.transfer(address(this), wethAmount);
@@ -104,35 +120,48 @@ contract AaveHelperTest is Test, AaveHelper {
 
     function test_swap() public {
         vm.prank(address(weth));
-        weth.transfer(address(this), 2 ether);
+        weth.transfer(address(this), 10 ether);
 
-        DecimalNumber memory _poolFeeUSDCUnits = convertToUSDCDecimals(uniPoolFee);
+        DecimalNumber memory _poolFeeUSDCUnits = convertToUSDCDecimals(UNI_POOL_FEE);
 
         DecimalNumber memory _wethBeforeSwap = convertToUSDCDecimals(
             balanceOf(weth, address(this))
         );
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(address(weth));
-        DecimalNumber memory _usdcPrice = getAssetPrice(address(usdc));
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
         DecimalNumber memory _wethPriceUSDC = convertToUSDCDecimals(
-            fixedDiv(_wethPriceUSD, _usdcPrice)
+            fixedDiv(_wethPriceUSD, _usdcPriceUSD)
         );
-        DecimalNumber memory _amountUSDC = fixedMul(_wethBeforeSwap, _wethPriceUSDC);
-        DecimalNumber memory _uniFeeUSDC = fixedMul(_poolFeeUSDCUnits, _wethPriceUSDC);
-        DecimalNumber memory _expectedBackUSDC = fixedDiv(_amountUSDC, _usdcPrice);
+        DecimalNumber memory _wethAmountUSDC = fixedMul(_wethBeforeSwap, _wethPriceUSDC);
+        DecimalNumber memory _uniFeeETHAsUSDCUnits = fixedMul(_poolFeeUSDCUnits, _wethBeforeSwap);
+        DecimalNumber memory _uniFeeUSDC = fixedMul(_wethPriceUSDC, _uniFeeETHAsUSDCUnits);
+        DecimalNumber memory _slippage = fixedMul(
+            _wethAmountUSDC,
+            convertToUSDCDecimals(MAX_SLIPPAGE)
+        );
+        DecimalNumber memory _expectedBackUSDC = fixedSub(
+            fixedSub(_wethAmountUSDC, _uniFeeUSDC),
+            _slippage
+        );
+        DecimalNumber memory _totalLosses = fixedSub(_wethAmountUSDC, _expectedBackUSDC);
 
         console.log("ETH to be traded %s", _wethBeforeSwap.number);
-        console.log("USDC/USD price %s", _usdcPrice.number);
+        console.log("USDC/USD price %s", _usdcPriceUSD.number);
+        console.log("ETH/USD price: %s", _wethPriceUSD.number);
         console.log("ETH/USDC price: %s", _wethPriceUSDC.number);
-        console.log("Trading this in usdc %s", _amountUSDC.number);
-        // console.log("Uni fee eth %s", _uniFeeETH.number);
+        console.log("Trading this in usdc %s", _wethAmountUSDC.number);
+        console.log("Uni fee eth %s", _uniFeeETHAsUSDCUnits.number);
         console.log("Uni fee usdc %s", _uniFeeUSDC.number);
-        // console.log("Amount usd we should get %s", _expectedBackUSD.number);
         console.log("Amount usdc we should get %s", _expectedBackUSDC.number);
+        console.log("Slippage+fees %s", _totalLosses.number);
 
         swapDebt(weth, usdc, _expectedBackUSDC, pool);
 
         console.log("USDC After swap: %s", usdc.balanceOf(address(this)));
 
-        assertLt(weth.balanceOf(address(this)), _wethBeforeSwap.number);
+        assertLt(
+            convertToUSDCDecimals(balanceOf(weth, address(this))).number,
+            _wethBeforeSwap.number
+        );
     }
 }

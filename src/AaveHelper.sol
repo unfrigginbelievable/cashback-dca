@@ -21,6 +21,7 @@ error AaveHelper__SwapDecimalsDoNotMatch();
 error AaveHelper__DivDecimalsDoNotMatch();
 error AaveHelper__MulDecimalsDoNotMatch();
 error AaveHelper__SubDecimalsDoNotMatch();
+error AaveHelper__AddDecimalsDoNotMatch();
 
 contract AaveHelper {
     struct DecimalNumber {
@@ -29,7 +30,8 @@ contract AaveHelper {
     }
 
     uint256 public feeConverter = 1e12;
-    DecimalNumber public uniPoolFee = DecimalNumber({number: 3000 * feeConverter, decimals: 18});
+    DecimalNumber public UNI_POOL_FEE = DecimalNumber({number: 3000 * feeConverter, decimals: 18});
+    DecimalNumber public MAX_SLIPPAGE = DecimalNumber({number: 5000 * feeConverter, decimals: 18});
 
     IPool public pool;
     IPriceOracle public oracle;
@@ -56,7 +58,7 @@ contract AaveHelper {
         ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
             tokenIn: address(_inAsset),
             tokenOut: address(_outAsset),
-            fee: uint24(uniPoolFee.number / feeConverter),
+            fee: uint24(UNI_POOL_FEE.number / feeConverter),
             recipient: address(this),
             deadline: block.timestamp,
             amountInMaximum: _inAmountMax.number,
@@ -75,6 +77,17 @@ contract AaveHelper {
      * ==================================================================
      */
 
+    function convertAaveUintToWei(DecimalNumber memory _x)
+        internal
+        pure
+        returns (DecimalNumber memory)
+    {
+        if (_x.decimals != 8) {
+            revert AaveHelper__ConvertAAVEDecimalsDoNotMatch();
+        }
+        return DecimalNumber({number: _x.number * 1e10, decimals: 18});
+    }
+
     function convertToUSDCDecimals(DecimalNumber memory _x)
         internal
         pure
@@ -86,24 +99,13 @@ contract AaveHelper {
         return DecimalNumber({number: _x.number / 1e12, decimals: 6});
     }
 
-    function getAssetPrice(address _asset) internal view returns (DecimalNumber memory) {
+    function getAssetPrice(IERC20Metadata _asset) internal view returns (DecimalNumber memory) {
         DecimalNumber memory _aavePrice = DecimalNumber({
-            number: oracle.getAssetPrice(_asset),
+            number: oracle.getAssetPrice(address(_asset)),
             decimals: 8
         });
         DecimalNumber memory _weiPrice = convertAaveUintToWei(_aavePrice);
         return _weiPrice;
-    }
-
-    function convertAaveUintToWei(DecimalNumber memory _x)
-        internal
-        pure
-        returns (DecimalNumber memory)
-    {
-        if (_x.decimals != 8) {
-            revert AaveHelper__ConvertAAVEDecimalsDoNotMatch();
-        }
-        return DecimalNumber({number: _x.number * 1e10, decimals: 18});
     }
 
     function balanceOf(IERC20Metadata _token, address _x)
@@ -152,6 +154,19 @@ contract AaveHelper {
         }
         console.log("SUB: %s, %s", _x.number, _y.number);
         uint256 _result = _x.number - _y.number;
+        return DecimalNumber({number: _result, decimals: _x.decimals});
+    }
+
+    function fixedAdd(DecimalNumber memory _x, DecimalNumber memory _y)
+        internal
+        view
+        returns (DecimalNumber memory)
+    {
+        if (_x.decimals != _y.decimals) {
+            revert AaveHelper__AddDecimalsDoNotMatch();
+        }
+        console.log("ADD: %s, %s", _x.number, _y.number);
+        uint256 _result = _x.number + _y.number;
         return DecimalNumber({number: _result, decimals: _x.decimals});
     }
 }
