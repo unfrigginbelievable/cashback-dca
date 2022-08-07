@@ -136,6 +136,10 @@ contract AaveHelper {
         view
         returns (DecimalNumber memory)
     {
+        if (_x.decimals == _convertTo) {
+            return _x;
+        }
+
         if (_x.decimals != 18) {
             revert AaveHelper__AssetMustHave18Decimals();
         }
