@@ -16,6 +16,8 @@ import "src/AaveHelper.sol";
 contract AaveHelperTest is Test, AaveHelper {
     IERC20Metadata public weth;
     IERC20Metadata public usdc;
+    IERC20Metadata public usdt;
+    IERC20Metadata public dai;
     uint256 public wethAmount = 1 ether;
 
     string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
@@ -31,6 +33,8 @@ contract AaveHelperTest is Test, AaveHelper {
         IPoolAddressesProvider pap = IPoolAddressesProvider(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb
         );
+        dai = IERC20Metadata(0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1);
+        usdt = IERC20Metadata(0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9);
 
         pool = IPool(pap.getPool());
         oracle = IPriceOracle(pap.getPriceOracle());
@@ -120,48 +124,16 @@ contract AaveHelperTest is Test, AaveHelper {
 
     function test_swap() public {
         vm.prank(address(weth));
-        weth.transfer(address(this), 10 ether);
+        weth.transfer(address(this), wethAmount);
 
-        DecimalNumber memory _poolFeeUSDCUnits = convertToUSDCDecimals(UNI_POOL_FEE);
+        uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
 
-        DecimalNumber memory _wethBeforeSwap = convertToUSDCDecimals(
-            balanceOf(weth, address(this))
-        );
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
-        DecimalNumber memory _wethPriceUSDC = convertToUSDCDecimals(
-            fixedDiv(_wethPriceUSD, _usdcPriceUSD)
-        );
-        DecimalNumber memory _wethAmountUSDC = fixedMul(_wethBeforeSwap, _wethPriceUSDC);
-        DecimalNumber memory _uniFeeETHAsUSDCUnits = fixedMul(_poolFeeUSDCUnits, _wethBeforeSwap);
-        DecimalNumber memory _uniFeeUSDC = fixedMul(_wethPriceUSDC, _uniFeeETHAsUSDCUnits);
-        DecimalNumber memory _slippage = fixedMul(
-            _wethAmountUSDC,
-            convertToUSDCDecimals(MAX_SLIPPAGE)
-        );
-        DecimalNumber memory _expectedBackUSDC = fixedSub(
-            fixedSub(_wethAmountUSDC, _uniFeeUSDC),
-            _slippage
-        );
-        DecimalNumber memory _totalLosses = fixedSub(_wethAmountUSDC, _expectedBackUSDC);
-
-        console.log("ETH to be traded %s", _wethBeforeSwap.number);
-        console.log("USDC/USD price %s", _usdcPriceUSD.number);
-        console.log("ETH/USD price: %s", _wethPriceUSD.number);
-        console.log("ETH/USDC price: %s", _wethPriceUSDC.number);
-        console.log("Trading this in usdc %s", _wethAmountUSDC.number);
-        console.log("Uni fee eth %s", _uniFeeETHAsUSDCUnits.number);
-        console.log("Uni fee usdc %s", _uniFeeUSDC.number);
-        console.log("Amount usdc we should get %s", _expectedBackUSDC.number);
-        console.log("Slippage+fees %s", _totalLosses.number);
-
-        swapDebt(weth, usdc, _expectedBackUSDC, pool);
+        swapDebt(weth, usdc);
 
         console.log("USDC After swap: %s", usdc.balanceOf(address(this)));
+        console.log("Dai After swap: %s", dai.balanceOf(address(this)));
+        console.log("USDT After swap: %s", usdt.balanceOf(address(this)));
 
-        assertLt(
-            convertToUSDCDecimals(balanceOf(weth, address(this))).number,
-            _wethBeforeSwap.number
-        );
+        assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
     }
 }

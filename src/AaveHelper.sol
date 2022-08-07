@@ -17,11 +17,13 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 error AaveHelper__ConvertUSDCDecimalsDoNotMatch();
 error AaveHelper__ConvertAAVEDecimalsDoNotMatch();
+error AaveHelper__AssetMustHave18Decimals();
 error AaveHelper__SwapDecimalsDoNotMatch();
 error AaveHelper__DivDecimalsDoNotMatch();
 error AaveHelper__MulDecimalsDoNotMatch();
 error AaveHelper__SubDecimalsDoNotMatch();
 error AaveHelper__AddDecimalsDoNotMatch();
+error AaveHelper__ConversionOutsideBounds();
 
 contract AaveHelper {
     struct DecimalNumber {
@@ -31,18 +33,16 @@ contract AaveHelper {
 
     uint256 public feeConverter = 1e12;
     DecimalNumber public UNI_POOL_FEE = DecimalNumber({number: 3000 * feeConverter, decimals: 18});
-    DecimalNumber public MAX_SLIPPAGE = DecimalNumber({number: 5000 * feeConverter, decimals: 18});
+    DecimalNumber public MAX_SLIPPAGE = DecimalNumber({number: 10000 * feeConverter, decimals: 18});
 
     IPool public pool;
     IPriceOracle public oracle;
     ISwapRouter public router;
 
-    function swapDebt(
+    function swapAssets(
         IERC20Metadata _inAsset,
         IERC20Metadata _outAsset,
-        DecimalNumber memory _outAmount,
-        // ISwapRouter _router,
-        IPool _pool
+        DecimalNumber memory _outAmount
     ) internal returns (uint256) {
         if (_outAsset.decimals() != _outAmount.decimals) {
             revert AaveHelper__SwapDecimalsDoNotMatch();
@@ -66,9 +66,41 @@ contract AaveHelper {
             sqrtPriceLimitX96: 0
         });
 
-        console.log("About to swap");
-
         return router.exactOutputSingle(params);
+    }
+
+    function swapDebt(IERC20Metadata _debtAsset, IERC20Metadata _swapAsset)
+        internal
+        returns (uint256)
+    {
+        // TODO: Should this take in the slippage % as param?
+
+        DecimalNumber memory _debtAssetBeforeSwap = balanceOf(_debtAsset, address(this));
+        DecimalNumber memory _debtAssetPriceUSD = getAssetPrice(_debtAsset);
+        DecimalNumber memory _swapAssetPriceUSD = getAssetPrice(_swapAsset);
+
+        DecimalNumber memory _debtAssetPriceInSwapAsset = fixedDiv(
+            _debtAssetPriceUSD,
+            _swapAssetPriceUSD
+        );
+        DecimalNumber memory _debtAssetAmountInSwapAsset = fixedMul(
+            _debtAssetBeforeSwap,
+            _debtAssetPriceInSwapAsset
+        );
+        DecimalNumber memory _uniFeeInDebtAsset = fixedMul(UNI_POOL_FEE, _debtAssetBeforeSwap);
+        DecimalNumber memory _uniFeeInSwapAsset = fixedMul(
+            _debtAssetPriceInSwapAsset,
+            _uniFeeInDebtAsset
+        );
+        DecimalNumber memory _slippage = fixedMul(_debtAssetAmountInSwapAsset, MAX_SLIPPAGE);
+        DecimalNumber memory _expectedBackInSwapAsset = convertDecimals(
+            fixedSub(fixedSub(_debtAssetAmountInSwapAsset, _uniFeeInSwapAsset), _slippage),
+            _swapAsset.decimals()
+        );
+
+        swapAssets(_debtAsset, _swapAsset, _expectedBackInSwapAsset);
+
+        // TODO: The actual debt swap lol
     }
 
     /*
@@ -97,6 +129,30 @@ contract AaveHelper {
             revert AaveHelper__ConvertUSDCDecimalsDoNotMatch();
         }
         return DecimalNumber({number: _x.number / 1e12, decimals: 6});
+    }
+
+    function convertDecimals(DecimalNumber memory _x, uint256 _convertTo)
+        internal
+        view
+        returns (DecimalNumber memory)
+    {
+        if (_x.decimals != 18) {
+            revert AaveHelper__AssetMustHave18Decimals();
+        }
+
+        if (_convertTo > 18 || _convertTo == 0) {
+            revert AaveHelper__ConversionOutsideBounds();
+        }
+
+        console.log("CONVERT: %s, %s, %s", _x.number, _x.decimals, _convertTo);
+
+        uint256 _removeDecimals = _x.decimals - _convertTo;
+        console.log("REMOVEDEC %s", _removeDecimals);
+
+        uint256 _newNumber = _x.number / (10**_removeDecimals);
+        console.log("NEWNUM %s", _newNumber);
+
+        return DecimalNumber({number: _newNumber, decimals: _convertTo});
     }
 
     function getAssetPrice(IERC20Metadata _asset) internal view returns (DecimalNumber memory) {
