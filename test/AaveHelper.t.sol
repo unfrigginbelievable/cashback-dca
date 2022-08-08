@@ -10,6 +10,8 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "aave/contracts/protocol/libraries/types/DataTypes.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "aave-periphery/contracts/misc/interfaces/IUiPoolDataProviderV3.sol";
+import "aave-periphery/contracts/misc/interfaces/IWETHGateway.sol";
 
 import "src/AaveHelper.sol";
 
@@ -18,6 +20,12 @@ contract AaveHelperTest is Test, AaveHelper {
     IERC20Metadata public usdc;
     IERC20Metadata public usdt;
     IERC20Metadata public dai;
+    IERC20Metadata public vArbWeth;
+    IERC20Metadata public sArbWeth;
+    IERC20Metadata public aArbWeth;
+    IUiPoolDataProviderV3 public poolData;
+    IPoolAddressesProvider public pap;
+    IWETHGateway public wethGW;
     uint256 public wethAmount = 1 ether;
 
     string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
@@ -30,15 +38,18 @@ contract AaveHelperTest is Test, AaveHelper {
 
         weth = IERC20Metadata(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
         usdc = IERC20Metadata(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
-        IPoolAddressesProvider pap = IPoolAddressesProvider(
-            0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb
-        );
+        pap = IPoolAddressesProvider(0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb);
         dai = IERC20Metadata(0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1);
         usdt = IERC20Metadata(0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9);
+        vArbWeth = IERC20Metadata(0x0c84331e39d6658Cd6e6b9ba04736cC4c4734351);
+        aArbWeth = IERC20Metadata(0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8);
+        sArbWeth = IERC20Metadata(0xD8Ad37849950903571df17049516a5CD4cbE55F6);
 
         pool = IPool(pap.getPool());
         oracle = IPriceOracle(pap.getPriceOracle());
         router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+        poolData = IUiPoolDataProviderV3(0x3f960bB91e85Ae2dB561BDd01B515C5A5c65802b);
+        wethGW = IWETHGateway(0xC09e69E79106861dF5d289dA88349f10e2dc6b5C);
     }
 
     function test_convertAAVEUnitToWei() public {
@@ -122,18 +133,50 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_result.decimals, 6, "Fixed-Point subtraction failed");
     }
 
-    function test_swap() public {
+    function test_repayDebt() public {
         vm.prank(address(weth));
         weth.transfer(address(this), wethAmount);
 
-        uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
+        DecimalNumber memory _wethAmount = balanceOf(weth, address(this));
+        DecimalNumber memory _borrowAmount = DecimalNumber({
+            number: _wethAmount.number / 2,
+            decimals: 18
+        });
 
-        swapDebt(weth, usdc);
+        weth.approve(address(pool), _wethAmount.number);
+        pool.supply(address(weth), wethAmount, address(this), 0);
+        pool.borrow(address(weth), _borrowAmount.number, 2, 0, address(this));
 
-        console.log("USDC After swap: %s", usdc.balanceOf(address(this)));
-        console.log("Dai After swap: %s", dai.balanceOf(address(this)));
-        console.log("USDT After swap: %s", usdt.balanceOf(address(this)));
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
 
-        assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
+        DecimalNumber memory _repayAmount = DecimalNumber({
+            number: _borrowAmount.number + 0.1 ether,
+            decimals: 18
+        });
+
+        vm.prank(address(weth));
+        weth.transfer(address(this), _repayAmount.number);
+
+        DecimalNumber memory _amountRepaid = repayDebt(weth, _repayAmount, getAssetPrice(weth));
+
+        assertGt(_amountRepaid.number, _borrowAmount.number);
+        assertEq(_amountRepaid.decimals, 18);
     }
+
+    // function test_swap() public {
+    //     vm.prank(address(weth));
+    //     weth.transfer(address(this), wethAmount);
+
+    //     uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
+
+    //     swapDebt(weth, usdc, 10);
+
+    //     console.log("USDC After swap: %s", usdc.balanceOf(address(this)));
+    //     console.log("Dai After swap: %s", dai.balanceOf(address(this)));
+    //     console.log("USDT After swap: %s", usdt.balanceOf(address(this)));
+
+    //     assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
+    // }
 }

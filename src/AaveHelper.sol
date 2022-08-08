@@ -24,6 +24,7 @@ error AaveHelper__MulDecimalsDoNotMatch();
 error AaveHelper__SubDecimalsDoNotMatch();
 error AaveHelper__AddDecimalsDoNotMatch();
 error AaveHelper__ConversionOutsideBounds();
+error AaveHelper__NotEnoughToPayBackDebt();
 
 contract AaveHelper {
     struct DecimalNumber {
@@ -38,6 +39,35 @@ contract AaveHelper {
     IPool public pool;
     IPriceOracle public oracle;
     ISwapRouter public router;
+
+    function borrowAsset(IERC20Metadata _newDebtAsset) internal {}
+
+    function repayDebt(
+        IERC20Metadata _oldDebtAsset,
+        DecimalNumber memory _amountOldDebtAssetBeforeSwap,
+        DecimalNumber memory _oldDebtAssetPriceUSD
+    ) internal returns (DecimalNumber memory _amountRepaid) {
+        DecimalNumber memory _totalDebtUSD = getTotalDebt(address(this));
+        DecimalNumber memory _totalDebtInOldDebtAsset = fixedDiv(
+            _totalDebtUSD,
+            _oldDebtAssetPriceUSD
+        );
+
+        if (_totalDebtInOldDebtAsset.number > _amountOldDebtAssetBeforeSwap.number) {
+            revert AaveHelper__NotEnoughToPayBackDebt();
+        }
+
+        _oldDebtAsset.approve(address(pool), _amountOldDebtAssetBeforeSwap.number);
+        _amountRepaid = DecimalNumber({
+            number: pool.repay(
+                address(_oldDebtAsset),
+                _amountOldDebtAssetBeforeSwap.number,
+                2,
+                address(this)
+            ),
+            decimals: _oldDebtAsset.decimals()
+        });
+    }
 
     function swapAssets(
         IERC20Metadata _inAsset,
@@ -69,38 +99,80 @@ contract AaveHelper {
         return router.exactOutputSingle(params);
     }
 
-    function swapDebt(IERC20Metadata _debtAsset, IERC20Metadata _swapAsset)
-        internal
-        returns (uint256)
-    {
+    function swapDebt(
+        IERC20Metadata _oldDebtAsset,
+        IERC20Metadata _newDebtAsset,
+        DecimalNumber memory _paybackAmount
+    ) internal returns (uint256) {
+        /*
+         * repay usdc debt, take out eth loan, swap eth to usdc, repay flash loan.
+         * Old bet asset: usdc
+         * New debt asset: eth
+         * Swap to asset: usdc
+         */
         // TODO: Should this take in the slippage % as param?
+        // TODO: Do the debt swap lol
 
-        DecimalNumber memory _debtAssetBeforeSwap = balanceOf(_debtAsset, address(this));
-        DecimalNumber memory _debtAssetPriceUSD = getAssetPrice(_debtAsset);
-        DecimalNumber memory _swapAssetPriceUSD = getAssetPrice(_swapAsset);
+        /*
+         * Get amount of debt quoted in debt asset
+         * Check that this account has enough to pay off the debt
+         * Intended to be used with flash loans.
+         */
 
-        DecimalNumber memory _debtAssetPriceInSwapAsset = fixedDiv(
-            _debtAssetPriceUSD,
-            _swapAssetPriceUSD
+        /*=================================================================================
+                                        REPAY DEBT
+        =================================================================================*/
+        DecimalNumber memory _amountOldDebtAssetBeforeSwap = balanceOf(
+            _oldDebtAsset,
+            address(this)
         );
-        DecimalNumber memory _debtAssetAmountInSwapAsset = fixedMul(
-            _debtAssetBeforeSwap,
-            _debtAssetPriceInSwapAsset
+        DecimalNumber memory _oldDebtAssetPriceUSD = getAssetPrice(_oldDebtAsset);
+        repayDebt(_oldDebtAsset, _amountOldDebtAssetBeforeSwap, _oldDebtAssetPriceUSD);
+
+        /*=================================================================================
+                                        TAKE NEW LOAN
+        =================================================================================*/
+
+        // TODO: Make new borrow in new debt asset
+        // TODO: How much do we need to borrow?
+        // Prob something like (totalDebtUSD + tradeSlippage + flashloanFeeUSD)/newDebtAssetUSD
+        // Maybe I pass in the required payback from flashloan as a param?
+
+        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
+        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
+            _oldDebtAssetPriceUSD,
+            _newDebtAssetPriceUSD
         );
-        DecimalNumber memory _uniFeeInDebtAsset = fixedMul(UNI_POOL_FEE, _debtAssetBeforeSwap);
-        DecimalNumber memory _uniFeeInSwapAsset = fixedMul(
-            _debtAssetPriceInSwapAsset,
-            _uniFeeInDebtAsset
+        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
+            _newDebtAssetPriceUSD,
+            _oldDebtAssetPriceUSD
         );
-        DecimalNumber memory _slippage = fixedMul(_debtAssetAmountInSwapAsset, MAX_SLIPPAGE);
-        DecimalNumber memory _expectedBackInSwapAsset = convertDecimals(
-            fixedSub(fixedSub(_debtAssetAmountInSwapAsset, _uniFeeInSwapAsset), _slippage),
-            _swapAsset.decimals()
+        DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
+            _amountOldDebtAssetBeforeSwap,
+            _oldDebtAssetPriceInNewDebtAsset
+        );
+        DecimalNumber memory _uniFeeInOldDebtAsset = fixedMul(
+            UNI_POOL_FEE,
+            _amountOldDebtAssetBeforeSwap
+        );
+        DecimalNumber memory _uniFeeInNewDebtAsset = fixedMul(
+            _oldDebtAssetPriceInNewDebtAsset,
+            _uniFeeInOldDebtAsset
+        );
+        DecimalNumber memory _slippage = fixedMul(_oldDebtAssetAmountInNewDebtAsset, MAX_SLIPPAGE);
+        DecimalNumber memory _expectedBackInNewDebtAsset = removePrecision(
+            fixedSub(fixedSub(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
+            _newDebtAsset.decimals()
         );
 
-        swapAssets(_debtAsset, _swapAsset, _expectedBackInSwapAsset);
+        DecimalNumber memory _newLoanAmount = fixedAdd(
+            _expectedBackInNewDebtAsset,
+            fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
+        );
 
-        // TODO: The actual debt swap lol
+        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, 1, 0, address(this));
+
+        swapAssets(_newDebtAsset, _oldDebtAsset, _expectedBackInNewDebtAsset);
     }
 
     /*
@@ -131,7 +203,7 @@ contract AaveHelper {
         return DecimalNumber({number: _x.number / 1e12, decimals: 6});
     }
 
-    function convertDecimals(DecimalNumber memory _x, uint256 _convertTo)
+    function removePrecision(DecimalNumber memory _x, uint256 _convertTo)
         internal
         view
         returns (DecimalNumber memory)
@@ -168,6 +240,12 @@ contract AaveHelper {
         return _weiPrice;
     }
 
+    function getTotalDebt(address _account) internal view returns (DecimalNumber memory) {
+        (, uint256 _debtAmount, , , , ) = pool.getUserAccountData(_account);
+
+        return convertAaveUintToWei(DecimalNumber({number: _debtAmount, decimals: 8}));
+    }
+
     function balanceOf(IERC20Metadata _token, address _x)
         internal
         view
@@ -175,6 +253,10 @@ contract AaveHelper {
     {
         return DecimalNumber({number: _token.balanceOf(_x), decimals: _token.decimals()});
     }
+
+    /* -------------------------------------------------------------------------------------
+                                    Math Functions
+       ------------------------------------------------------------------------------------*/
 
     function fixedDiv(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
