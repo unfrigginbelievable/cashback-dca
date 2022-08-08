@@ -133,6 +133,8 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_result.decimals, 6, "Fixed-Point subtraction failed");
     }
 
+    function test_borrowAsset() public {}
+
     function test_repayDebt() public {
         vm.prank(address(weth));
         weth.transfer(address(this), wethAmount);

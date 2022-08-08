@@ -40,7 +40,49 @@ contract AaveHelper {
     IPriceOracle public oracle;
     ISwapRouter public router;
 
-    function borrowAsset(IERC20Metadata _newDebtAsset) internal {}
+    function borrowAsset(
+        IERC20Metadata _newDebtAsset,
+        DecimalNumber memory _oldDebtAssetPriceUSD,
+        DecimalNumber memory _amountOldDebtAssetBeforeSwap,
+        DecimalNumber memory _paybackAmount,
+        uint256 _rateType
+    ) internal returns (DecimalNumber memory) {
+        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
+        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
+            _oldDebtAssetPriceUSD,
+            _newDebtAssetPriceUSD
+        );
+        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
+            _newDebtAssetPriceUSD,
+            _oldDebtAssetPriceUSD
+        );
+        DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
+            _amountOldDebtAssetBeforeSwap,
+            _oldDebtAssetPriceInNewDebtAsset
+        );
+        DecimalNumber memory _uniFeeInOldDebtAsset = fixedMul(
+            UNI_POOL_FEE,
+            _amountOldDebtAssetBeforeSwap
+        );
+        DecimalNumber memory _uniFeeInNewDebtAsset = fixedMul(
+            _oldDebtAssetPriceInNewDebtAsset,
+            _uniFeeInOldDebtAsset
+        );
+        DecimalNumber memory _slippage = fixedMul(_oldDebtAssetAmountInNewDebtAsset, MAX_SLIPPAGE);
+        DecimalNumber memory _expectedBackInNewDebtAsset = removePrecision(
+            fixedSub(fixedSub(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
+            _newDebtAsset.decimals()
+        );
+
+        DecimalNumber memory _newLoanAmount = fixedAdd(
+            _expectedBackInNewDebtAsset,
+            fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
+        );
+
+        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, _rateType, 0, address(this));
+
+        return _newLoanAmount;
+    }
 
     function repayDebt(
         IERC20Metadata _oldDebtAsset,
@@ -102,7 +144,8 @@ contract AaveHelper {
     function swapDebt(
         IERC20Metadata _oldDebtAsset,
         IERC20Metadata _newDebtAsset,
-        DecimalNumber memory _paybackAmount
+        DecimalNumber memory _paybackAmount,
+        uint256 _rateType
     ) internal returns (uint256) {
         /*
          * repay usdc debt, take out eth loan, swap eth to usdc, repay flash loan.
@@ -138,7 +181,7 @@ contract AaveHelper {
         // Prob something like (totalDebtUSD + tradeSlippage + flashloanFeeUSD)/newDebtAssetUSD
         // Maybe I pass in the required payback from flashloan as a param?
 
-        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
+        /*DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
         DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
             _oldDebtAssetPriceUSD,
             _newDebtAssetPriceUSD
@@ -170,9 +213,16 @@ contract AaveHelper {
             fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
         );
 
-        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, 1, 0, address(this));
+        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, 1, 0, address(this));*/
+        DecimalNumber memory _newLoanAmount = borrowAsset(
+            _newDebtAsset,
+            _oldDebtAssetPriceUSD,
+            _amountOldDebtAssetBeforeSwap,
+            _paybackAmount,
+            _rateType
+        );
 
-        swapAssets(_newDebtAsset, _oldDebtAsset, _expectedBackInNewDebtAsset);
+        swapAssets(_newDebtAsset, _oldDebtAsset, _newLoanAmount);
     }
 
     /*
