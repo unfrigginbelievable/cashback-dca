@@ -36,6 +36,14 @@ contract AaveHelper {
     IPriceOracle public oracle;
     ISwapRouter public router;
 
+    function calcNewLoan(DecimalNumber memory _deposits, DecimalNumber memory _loanPercentage)
+        internal
+        pure
+        returns (DecimalNumber memory)
+    {
+        return fixedMul(_deposits, _loanPercentage);
+    }
+
     /*
      * Does all the calculations to borrow
      * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
@@ -183,7 +191,7 @@ contract AaveHelper {
          */
 
         DecimalNumber memory _amountOldDebtAssetBeforeSwap = addPrecision(
-            balanceOf(_oldDebtAsset, address(this)),
+            getBalanceOf(_oldDebtAsset, address(this)),
             18
         );
 
@@ -313,8 +321,58 @@ contract AaveHelper {
         return convertAaveUintToWei(DecimalNumber({number: _debtAmount, decimals: 8}));
     }
 
+    function getUserDetails(address _account)
+        internal
+        view
+        returns (
+            DecimalNumber memory,
+            DecimalNumber memory,
+            DecimalNumber memory,
+            DecimalNumber memory,
+            DecimalNumber memory,
+            DecimalNumber memory
+        )
+    {
+        (
+            uint256 _depo,
+            uint256 _debt,
+            uint256 _availBorrows,
+            uint256 _clt,
+            uint256 _ltv,
+            uint256 _health
+        ) = pool.getUserAccountData(_account);
+
+        DecimalNumber memory _deposits = convertAaveUintToWei(
+            DecimalNumber({number: _depo, decimals: 8})
+        );
+        DecimalNumber memory _totalDebt = convertAaveUintToWei(
+            DecimalNumber({number: _debt, decimals: 8})
+        );
+        DecimalNumber memory _availableBorrows = convertAaveUintToWei(
+            DecimalNumber({number: _availBorrows, decimals: 8})
+        );
+        DecimalNumber memory _currLiqThresh = addPrecision(
+            DecimalNumber({number: _clt, decimals: 2}),
+            18
+        );
+        DecimalNumber memory _loanToValue = addPrecision(
+            DecimalNumber({number: _ltv, decimals: 2}),
+            18
+        );
+        DecimalNumber memory _healthFactor = DecimalNumber({number: _health, decimals: 18});
+
+        return (
+            _deposits,
+            _totalDebt,
+            _availableBorrows,
+            _currLiqThresh,
+            _loanToValue,
+            _healthFactor
+        );
+    }
+
     // TODO: This should return a standardized 18 decimals...
-    function balanceOf(IERC20Metadata _token, address _x)
+    function getBalanceOf(IERC20Metadata _token, address _x)
         internal
         view
         returns (DecimalNumber memory)
@@ -342,13 +400,13 @@ contract AaveHelper {
 
     function fixedMul(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
-        view
+        pure
         returns (DecimalNumber memory)
     {
         if (_x.decimals != _y.decimals) {
             revert AaveHelper__MulDecimalsDoNotMatch();
         }
-        console.log("MUL: %s, %s", _x.number, _y.number);
+
         uint256 _denominator = 10**_x.decimals;
         uint256 _result = Math.mulDiv(_x.number, _y.number, _denominator);
         return DecimalNumber({number: _result, decimals: _x.decimals});

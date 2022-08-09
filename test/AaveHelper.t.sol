@@ -80,7 +80,7 @@ contract AaveHelperTest is Test, AaveHelper {
     function test_balanceOf() public {
         address(weth).call{value: wethAmount}("");
 
-        DecimalNumber memory _result = balanceOf(weth, address(this));
+        DecimalNumber memory _result = getBalanceOf(weth, address(this));
 
         assertEq(_result.number, wethAmount);
         assertEq(_result.decimals, weth.decimals());
@@ -145,7 +145,7 @@ contract AaveHelperTest is Test, AaveHelper {
 
         DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
         DecimalNumber memory _wethPrice = getAssetPrice(weth);
-        DecimalNumber memory _wethAmount = balanceOf(weth, address(this));
+        DecimalNumber memory _wethAmount = getBalanceOf(weth, address(this));
 
         // Get the amount of USDC that represents half of wethAmount
         DecimalNumber memory _borrowAmount = fixedDiv(
@@ -164,7 +164,7 @@ contract AaveHelperTest is Test, AaveHelper {
     function test_repayDebt() public {
         address(weth).call{value: wethAmount}("");
 
-        DecimalNumber memory _wethAmount = balanceOf(weth, address(this));
+        DecimalNumber memory _wethAmount = getBalanceOf(weth, address(this));
         DecimalNumber memory _borrowAmount = DecimalNumber({
             number: _wethAmount.number / 2,
             decimals: 18
