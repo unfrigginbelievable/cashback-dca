@@ -233,7 +233,7 @@ contract AaveHelper {
             revert AaveHelper__AssetMustHave18Decimals();
         }
 
-        if (_convertTo > 18 || _convertTo == 0) {
+        if (_convertTo > 18 || _convertTo < 1) {
             revert AaveHelper__ConversionOutsideBounds();
         }
 

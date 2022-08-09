@@ -147,9 +147,6 @@ contract AaveHelperTest is Test, AaveHelper {
             _usdcPrice
         );
 
-        console.log("WETH Price: %s", _wethPrice.number);
-        console.log("Borrow amt: %s", _borrowAmount.number);
-
         weth.approve(address(pool), wethAmount);
         pool.supply(address(weth), wethAmount, address(this), 0);
 
@@ -190,18 +187,15 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_amountRepaid.decimals, 18);
     }
 
-    // function test_swap() public {
-    //     vm.prank(address(weth));
-    //     weth.transfer(address(this), wethAmount);
+    function test_swapAssets() public {
+        address(weth).call{value: wethAmount}("");
 
-    //     uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
+        uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
+        DecimalNumber memory _minBack = DecimalNumber({number: 1000000, decimals: 6});
 
-    //     swapDebt(weth, usdc, 10);
+        swapAssets(weth, usdc, _minBack);
 
-    //     console.log("USDC After swap: %s", usdc.balanceOf(address(this)));
-    //     console.log("Dai After swap: %s", dai.balanceOf(address(this)));
-    //     console.log("USDT After swap: %s", usdt.balanceOf(address(this)));
-
-    //     assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
-    // }
+        assertEq(usdc.balanceOf(address(this)), _minBack.number);
+        assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
+    }
 }
