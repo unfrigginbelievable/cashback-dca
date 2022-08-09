@@ -1,0 +1,7 @@
+{
+    "projectName": "Aavebot",
+    "namespace": "Aavebot.Contracts",
+    "lang": 0,
+    "autoCodeGen": true,
+    "projectPath": "../"
+}

@@ -50,9 +50,10 @@ contract AaveHelper {
         DecimalNumber memory _oldDebtAssetPriceUSD,
         DecimalNumber memory _amountOldDebtAssetBeforeSwap,
         DecimalNumber memory _paybackAmount,
-        uint256 _rateType
+        uint256 _borrowRateType
     ) internal returns (DecimalNumber memory) {
         DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
+
         DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
             _oldDebtAssetPriceUSD,
             _newDebtAssetPriceUSD
@@ -62,10 +63,12 @@ contract AaveHelper {
             _newDebtAssetPriceUSD,
             _oldDebtAssetPriceUSD
         );
+
         DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
             _amountOldDebtAssetBeforeSwap,
             _oldDebtAssetPriceInNewDebtAsset
         );
+
         DecimalNumber memory _uniFeeInOldDebtAsset = fixedMul(
             UNI_POOL_FEE,
             _amountOldDebtAssetBeforeSwap
@@ -85,7 +88,19 @@ contract AaveHelper {
             fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
         );
 
-        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, _rateType, 0, address(this));
+        console.log("USDC in this contract %s", _amountOldDebtAssetBeforeSwap.number);
+        console.log("WETH price USD: %s", _newDebtAssetPriceUSD.number);
+        console.log("USDC price in WETH: %s", _oldDebtAssetPriceInNewDebtAsset.number);
+        console.log("WETH price in USDC: %s", _newDebtAssetPriceInOldDebtAsset.number);
+        console.log("USDC debt in WETH: %s", _oldDebtAssetAmountInNewDebtAsset.number);
+        console.log("New loan %s", _expectedBackInNewDebtAsset.number);
+        pool.borrow(
+            address(_newDebtAsset),
+            _newLoanAmount.number,
+            _borrowRateType,
+            0,
+            address(this)
+        );
 
         return _newLoanAmount;
     }
@@ -163,7 +178,8 @@ contract AaveHelper {
         IERC20Metadata _oldDebtAsset,
         IERC20Metadata _newDebtAsset,
         DecimalNumber memory _paybackAmount,
-        uint256 _rateType
+        uint256 _repayRateType,
+        uint256 _borrowRateType
     ) internal returns (uint256) {
         /*
          * repay usdc debt, take out eth loan, swap eth to usdc, repay flash loan.
@@ -186,8 +202,18 @@ contract AaveHelper {
 
         DecimalNumber memory _oldDebtAssetPriceUSD = getAssetPrice(_oldDebtAsset);
 
+        DecimalNumber memory _debtInOldDebtAsset = fixedDiv(
+            getTotalDebt(address(this)),
+            _oldDebtAssetPriceUSD
+        );
+
         // Repay the old debt asset. Account is entirely paid back.
-        repayDebt(_oldDebtAsset, _amountOldDebtAssetBeforeSwap, _oldDebtAssetPriceUSD, _rateType);
+        repayDebt(
+            _oldDebtAsset,
+            _amountOldDebtAssetBeforeSwap,
+            _oldDebtAssetPriceUSD,
+            _repayRateType
+        );
 
         /*
          * Borrow using the new debt asset.
@@ -196,13 +222,17 @@ contract AaveHelper {
         DecimalNumber memory _newLoanAmount = borrowAsset(
             _newDebtAsset,
             _oldDebtAssetPriceUSD,
-            _amountOldDebtAssetBeforeSwap,
+            _debtInOldDebtAsset,
             _paybackAmount,
-            _rateType
+            _borrowRateType
         );
 
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
-        swapAssets(_newDebtAsset, _oldDebtAsset, _newLoanAmount);
+        swapAssets(
+            _newDebtAsset,
+            _oldDebtAsset,
+            removePrecision(_newLoanAmount, _oldDebtAsset.decimals())
+        );
     }
 
     /*
@@ -274,9 +304,9 @@ contract AaveHelper {
             revert AaveHelper__ConversionOutsideBounds();
         }
 
-        uint256 _addDecimals = _x.decimals + _convertTo;
+        uint256 _addDecimals = _convertTo - _x.decimals;
         uint256 _newNumber = _x.number * (10**_addDecimals);
-        return DecimalNumber({number: _newNumber, decimals: 18});
+        return DecimalNumber({number: _newNumber, decimals: _convertTo});
     }
 
     function getAssetPrice(IERC20Metadata _asset) internal view returns (DecimalNumber memory) {

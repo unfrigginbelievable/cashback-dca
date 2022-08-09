@@ -116,6 +116,12 @@ contract AaveHelperTest is Test, AaveHelper {
 
         assertEq(_result.number, 200000, "Fixed-Point division failed");
         assertEq(_result.decimals, 6, "Fixed-Point division failed");
+
+        _x = DecimalNumber({number: 991800000000000000, decimals: 18});
+        _y = DecimalNumber({number: 1649 ether, decimals: 18});
+        _result = fixedDiv(_x, _y);
+
+        assertEq(_result.number, 601455427531837);
     }
 
     function test_fixedSub() public {
@@ -201,7 +207,11 @@ contract AaveHelperTest is Test, AaveHelper {
     function test_swapDebt() public {
         address(weth).call{value: wethAmount}("");
 
-        DecimalNumber memory _loanAmount = DecimalNumber({number: 100000000, decimals: 6});
+        uint256 _borrowedUSDCAmount = 1300000000;
+        DecimalNumber memory _loanAmount = DecimalNumber({
+            number: _borrowedUSDCAmount,
+            decimals: 6
+        });
 
         weth.approve(address(pool), wethAmount);
         pool.supply(address(weth), wethAmount, address(this), 0);
@@ -216,6 +226,13 @@ contract AaveHelperTest is Test, AaveHelper {
         address(weth).call{value: wethAmount}("");
         swapAssets(weth, usdc, _loanAmount);
 
-        swapDebt(usdc, weth, DecimalNumber({number: 0, decimals: 18}), 1);
+        swapDebt(usdc, weth, DecimalNumber({number: 0, decimals: 18}), 1, 2);
+
+        console.log("Borrowed USDC amount %s", _loanAmount.number);
+        console.log("Ending USDC amount %s", usdc.balanceOf(address(this)));
+
+        uint256 _endingUSDCBal = usdc.balanceOf(address(this));
+        assertGt(_endingUSDCBal, _loanAmount.number);
+        assertApproxEqRel(_endingUSDCBal, _loanAmount.number, 0.01 ether);
     }
 }
