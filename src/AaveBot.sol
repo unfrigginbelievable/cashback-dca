@@ -12,6 +12,7 @@ import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "prb-math/contracts/PRBMathUD60x18.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
@@ -108,20 +109,20 @@ contract AaveBot is AaveHelper, ERC4626 {
                 console.log("Borrowing in USDC %s", _borrowAmountUSDC.number);
 
                 pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
-                // uint256 _payoutPool = usdc.balanceOf(address(this));
-                // for (uint256 i = 0; i < depositors.length; i++) {
-                //     uint256 _sharePercentage = PRBMathUD60x18.div(
-                //         this.balanceOf(depositors[i]),
-                //         this.totalSupply()
-                //     );
-                //     uint256 _depositorPayout = Math.min(
-                //         usdcAmountOwed[depositors[i]],
-                //         PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
-                //     );
-                //     usdcAmountOwed[depositors[i]] -= _depositorPayout;
-                //     usdc.transfer(depositors[i], _depositorPayout);
-                // }
-                // console.log("================GOT HERE=================");
+                uint256 _payoutPool = usdc.balanceOf(address(this));
+                for (uint256 i = 0; i < depositors.length; i++) {
+                    uint256 _sharePercentage = PRBMathUD60x18.div(
+                        this.balanceOf(depositors[i]),
+                        this.totalSupply()
+                    );
+                    uint256 _depositorPayout = Math.min(
+                        usdcAmountOwed[depositors[i]],
+                        PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
+                    );
+                    usdcAmountOwed[depositors[i]] -= _depositorPayout;
+                    usdc.transfer(depositors[i], _depositorPayout);
+                }
+                console.log("================GOT HERE=================");
             }
         }
 
@@ -141,5 +142,22 @@ contract AaveBot is AaveHelper, ERC4626 {
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {}
 
-    function afterDeposit(uint256 assets, uint256 shares) internal override {}
+    function afterDeposit(uint256 assets, uint256 shares) internal override {
+        DecimalNumber memory _wethAmount = DecimalNumber({number: assets, decimals: 18});
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+
+        // (_wethAmount * _wethPriceUSD) / _usdcPriceUSD -> to six decimal places
+        DecimalNumber memory _amountAsUsdc = removePrecision(
+            fixedDiv(fixedMul(_wethAmount, _wethPriceUSD), _usdcPriceUSD),
+            6
+        );
+
+        depositors.push(msg.sender);
+        usdcAmountOwed[msg.sender] += _amountAsUsdc.number;
+        console.log("ETH price %s", _wethPriceUSD.number);
+        console.log("USDC amount owed: %s", _amountAsUsdc.number);
+
+        main();
+    }
 }

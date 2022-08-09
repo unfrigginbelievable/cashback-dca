@@ -51,9 +51,8 @@ contract AaveBotTest is Test, AaveHelper {
 
     function test_Constructor() public {}
 
-    function test_main() public {
+    function test_deposit() public {
         address(weth).call{value: wethAmount}("");
-        weth.transfer(address(bot), wethAmount);
 
         DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
         DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
@@ -64,9 +63,10 @@ contract AaveBotTest is Test, AaveHelper {
             7500 * (1e14)
         ) / 1e12;
 
-        bot.main();
+        weth.approve(address(bot), wethAmount);
+        bot.deposit(wethAmount, address(this));
 
-        uint256 _howMuchBorrowed = usdc.balanceOf(address(bot));
+        uint256 _howMuchBorrowed = usdc.balanceOf(address(this));
 
         assertEq(_borrowAmountUSDC, _howMuchBorrowed);
     }
