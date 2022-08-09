@@ -127,7 +127,6 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         }
 
         if (_health.number <= 1.01 ether) {
-            // TODO: Covert borrows to weth
             console.log("Start of low health block");
 
             /*
@@ -248,33 +247,4 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     function POOL() external view returns (IPool) {
         return pool;
     }
-    /*
-    function loansInEth() public view returns (uint256) {
-        (, uint256 _totalDebt, , , , ) = pool.getUserAccountData(address(this));
-        return _priceToEth(_totalDebt);
-    }
-
-    function depositsInEth() public view returns (uint256) {
-        (uint256 _totalCollateral, , , , , ) = pool.getUserAccountData(address(this));
-        return _priceToEth(_totalCollateral);
-    }
-
-    function _priceToEth(uint256 _priceInUsd) public view returns (uint256) {
-        uint256 _oraclePrice = oracle.getAssetPrice(address(weth));
-        uint256 _result = PRBMathUD60x18.div(_priceInUsd, _oraclePrice);
-        return _result;
-    }
-
-    function getLoanThresholds(address _asset) public view returns (uint256, uint256) {
-        uint256 bits = pool.getReserveData(_asset).configuration.data;
-        uint256 ltv = bits & LTV_BIT_MASK;
-        uint256 liqThresh = (bits >> 16) & LTV_BIT_MASK;
-
-        return (ltv, liqThresh);
-    }
-
-    function calcNewLoan(uint256 _deposits, uint256 _loanPercentage) public pure returns (uint256) {
-        return PRBMathUD60x18.mul(_deposits, _loanPercentage);
-    }
-    */
 }
