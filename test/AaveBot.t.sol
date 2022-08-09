@@ -72,6 +72,19 @@ contract AaveBotTest is Test, AaveHelper {
         assertEq(_borrowAmountUSDC, _howMuchBorrowed);
     }
 
+    function test_lowHealth() public {
+        test_deposit();
+
+        // push borrows past the low health threshold
+        vm.prank(address(bot));
+        pool.borrow(address(usdc), 80000000, 1, 0, address(bot));
+
+        (, , , , , uint256 health) = pool.getUserAccountData(address(bot));
+        console.log(health);
+
+        bot.main();
+    }
+
     // function testDepositToAave() public {
     //     uint256 _ethPrice = oracle.getAssetPrice(address(weth));
 

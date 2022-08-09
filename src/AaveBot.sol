@@ -22,6 +22,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
     uint256 public constant LTV_BIT_MASK = 65535;
+    uint256 public constant LOW_HEALTH_THRESHOLD = 1.05 ether;
 
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
@@ -126,7 +127,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             }
         }
 
-        if (_health.number <= 1.01 ether) {
+        if (_health.number <= LOW_HEALTH_THRESHOLD) {
             console.log("Start of low health block");
 
             /*
@@ -135,7 +136,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
              * need to borrow (totalDebt * uniswapfee * uniswapslippage)
              */
             DecimalNumber memory _totalDebtUSDC = fixedDiv(_totalDebtUSD, getAssetPrice(usdc));
-            console.log("Borrowing USDC: %s", _totalDebtUSDC.number);
+            console.log("Flashloaning USDC: %s", _totalDebtUSDC.number);
             pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
         }
     }
