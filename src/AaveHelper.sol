@@ -93,8 +93,18 @@ contract AaveHelper {
     function repayDebt(
         IERC20Metadata _oldDebtAsset,
         DecimalNumber memory _amountOldDebtAssetBeforeSwap,
-        DecimalNumber memory _oldDebtAssetPriceUSD
+        DecimalNumber memory _oldDebtAssetPriceUSD,
+        uint256 _rateType
     ) internal returns (DecimalNumber memory _amountRepaid) {
+        if (_amountOldDebtAssetBeforeSwap.decimals != 18) {
+            revert AaveHelper__AssetMustHave18Decimals();
+        }
+
+        if (_oldDebtAssetPriceUSD.decimals != 18) {
+            revert AaveHelper__AssetMustHave18Decimals();
+        }
+
+        // Check if the amount of debt asset in contract can fully pack back loan
         DecimalNumber memory _totalDebtUSD = getTotalDebt(address(this));
         DecimalNumber memory _totalDebtInOldDebtAsset = fixedDiv(
             _totalDebtUSD,
@@ -102,15 +112,17 @@ contract AaveHelper {
         );
 
         if (_totalDebtInOldDebtAsset.number > _amountOldDebtAssetBeforeSwap.number) {
+            console.log(_totalDebtInOldDebtAsset.number);
             revert AaveHelper__NotEnoughToPayBackDebt();
         }
 
+        // repay the debt if check passes
         _oldDebtAsset.approve(address(pool), _amountOldDebtAssetBeforeSwap.number);
         _amountRepaid = DecimalNumber({
             number: pool.repay(
                 address(_oldDebtAsset),
                 _amountOldDebtAssetBeforeSwap.number,
-                2,
+                _rateType,
                 address(this)
             ),
             decimals: _oldDebtAsset.decimals()
@@ -167,14 +179,15 @@ contract AaveHelper {
         /*=================================================================================
                                         REPAY DEBT
         =================================================================================*/
-        DecimalNumber memory _amountOldDebtAssetBeforeSwap = balanceOf(
-            _oldDebtAsset,
-            address(this)
+        DecimalNumber memory _amountOldDebtAssetBeforeSwap = addPrecision(
+            balanceOf(_oldDebtAsset, address(this)),
+            18
         );
+
         DecimalNumber memory _oldDebtAssetPriceUSD = getAssetPrice(_oldDebtAsset);
 
         // Repay the old debt asset. Account is entirely paid back.
-        repayDebt(_oldDebtAsset, _amountOldDebtAssetBeforeSwap, _oldDebtAssetPriceUSD);
+        repayDebt(_oldDebtAsset, _amountOldDebtAssetBeforeSwap, _oldDebtAssetPriceUSD, _rateType);
 
         /*
          * Borrow using the new debt asset.
@@ -248,6 +261,24 @@ contract AaveHelper {
         return DecimalNumber({number: _newNumber, decimals: _convertTo});
     }
 
+    function addPrecision(DecimalNumber memory _x, uint256 _convertTo)
+        internal
+        pure
+        returns (DecimalNumber memory)
+    {
+        if (_x.decimals == _convertTo) {
+            return _x;
+        }
+
+        if (_convertTo > 18 || _convertTo < _x.decimals) {
+            revert AaveHelper__ConversionOutsideBounds();
+        }
+
+        uint256 _addDecimals = _x.decimals + _convertTo;
+        uint256 _newNumber = _x.number * (10**_addDecimals);
+        return DecimalNumber({number: _newNumber, decimals: 18});
+    }
+
     function getAssetPrice(IERC20Metadata _asset) internal view returns (DecimalNumber memory) {
         DecimalNumber memory _aavePrice = DecimalNumber({
             number: oracle.getAssetPrice(address(_asset)),
@@ -263,6 +294,7 @@ contract AaveHelper {
         return convertAaveUintToWei(DecimalNumber({number: _debtAmount, decimals: 8}));
     }
 
+    // TODO: This should return a standardized 18 decimals...
     function balanceOf(IERC20Metadata _token, address _x)
         internal
         view

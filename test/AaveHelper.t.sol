@@ -78,8 +78,8 @@ contract AaveHelperTest is Test, AaveHelper {
     }
 
     function test_balanceOf() public {
-        vm.prank(address(weth));
-        weth.transfer(address(this), wethAmount);
+        address(weth).call{value: wethAmount}("");
+
         DecimalNumber memory _result = balanceOf(weth, address(this));
 
         assertEq(_result.number, wethAmount);
@@ -156,8 +156,7 @@ contract AaveHelperTest is Test, AaveHelper {
     }
 
     function test_repayDebt() public {
-        vm.prank(address(weth));
-        weth.transfer(address(this), wethAmount);
+        address(weth).call{value: wethAmount}("");
 
         DecimalNumber memory _wethAmount = balanceOf(weth, address(this));
         DecimalNumber memory _borrowAmount = DecimalNumber({
@@ -181,7 +180,7 @@ contract AaveHelperTest is Test, AaveHelper {
         vm.prank(address(weth));
         weth.transfer(address(this), _repayAmount.number);
 
-        DecimalNumber memory _amountRepaid = repayDebt(weth, _repayAmount, getAssetPrice(weth));
+        DecimalNumber memory _amountRepaid = repayDebt(weth, _repayAmount, getAssetPrice(weth), 2);
 
         assertGt(_amountRepaid.number, _borrowAmount.number);
         assertEq(_amountRepaid.decimals, 18);
@@ -197,5 +196,26 @@ contract AaveHelperTest is Test, AaveHelper {
 
         assertEq(usdc.balanceOf(address(this)), _minBack.number);
         assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
+    }
+
+    function test_swapDebt() public {
+        address(weth).call{value: wethAmount}("");
+
+        DecimalNumber memory _loanAmount = DecimalNumber({number: 100000000, decimals: 6});
+
+        weth.approve(address(pool), wethAmount);
+        pool.supply(address(weth), wethAmount, address(this), 0);
+        // 100 usdc
+        pool.borrow(address(usdc), _loanAmount.number, 1, 0, address(this));
+
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        // Get some more USDC to cover interest accumulation
+        address(weth).call{value: wethAmount}("");
+        swapAssets(weth, usdc, _loanAmount);
+
+        swapDebt(usdc, weth, DecimalNumber({number: 0, decimals: 18}), 1);
     }
 }
