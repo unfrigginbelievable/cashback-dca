@@ -44,6 +44,26 @@ contract AaveHelper {
         return fixedMul(_deposits, _loanPercentage);
     }
 
+    /// @dev get price of amount x quoted in y
+    /// @notice asset prices should share a common quote asset before conversion (ie. both should be over USD)
+    function convertPriceDenomination(
+        IERC20Metadata _x,
+        IERC20Metadata _y,
+        DecimalNumber memory _amountX
+    ) internal view returns (DecimalNumber memory) {
+        if (_amountX.decimals != 18) {
+            revert AaveHelper__AssetMustHave18Decimals();
+        }
+
+        DecimalNumber memory _xPriceUSD = getAssetPrice(_x);
+        DecimalNumber memory _yPriceUSD = getAssetPrice(_y);
+
+        // (_wethAmount * _xPriceUSD) / _yPriceUSD -> to six decimal places
+        DecimalNumber memory _xAmountAsY = fixedDiv(fixedMul(_amountX, _xPriceUSD), _yPriceUSD);
+
+        return _xAmountAsY;
+    }
+
     /*
      * Does all the calculations to borrow
      * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
@@ -177,7 +197,7 @@ contract AaveHelper {
         DecimalNumber memory _paybackAmount,
         uint256 _repayRateType,
         uint256 _borrowRateType
-    ) internal {
+    ) internal returns (uint256) {
         /*
          * Example flow:
          * repay usdc debt, take out eth loan, swap eth to usdc, repay flash loan.
@@ -223,11 +243,12 @@ contract AaveHelper {
         );
 
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
-        swapAssets(
-            _newDebtAsset,
-            _oldDebtAsset,
-            removePrecision(_newLoanAmount, _oldDebtAsset.decimals())
-        );
+        return
+            swapAssets(
+                _newDebtAsset,
+                _oldDebtAsset,
+                removePrecision(_newLoanAmount, _oldDebtAsset.decimals())
+            );
     }
 
     /* ==================================================================

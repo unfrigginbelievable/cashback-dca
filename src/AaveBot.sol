@@ -126,16 +126,19 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             }
         }
 
-        // if (_health <= 1.01 ether) {
-        //     // TODO: Covert borrows to weth
-        //     console.log("Start of low health block");
+        if (_health.number <= 1.01 ether) {
+            // TODO: Covert borrows to weth
+            console.log("Start of low health block");
 
-        //     /*
-        //      * Converts usdc debt into weth debt.
-        //      * See executeOperation() below.
-        //      */
-        //     pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSD, "", 0);
-        // }
+            /*
+             * Converts usdc debt into weth debt.
+             * See executeOperation() below.
+             * need to borrow (totalDebt * uniswapfee * uniswapslippage)
+             */
+            DecimalNumber memory _totalDebtUSDC = fixedDiv(_totalDebtUSD, getAssetPrice(usdc));
+            console.log("Borrowing USDC: %s", _totalDebtUSDC.number);
+            pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
+        }
     }
 
     /* ================================================================
@@ -169,49 +172,75 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                         FLASHLOAN FUNCTIONS
        ================================================================ */
 
-    // function executeOperation(
-    //     address asset,
-    //     uint256 amount,
-    //     uint256 premium,
-    //     address initiator,
-    //     bytes calldata params
-    // ) external returns (bool) {
-    //     /*
-    //      * Flow:
-    //      * FlashLoan usdc to pay back debt
-    //      * Take out new debt in ETH, ensure eth value = _paybackAmount
-    //      * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
-    //      */
+    function executeOperation(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        address initiator,
+        bytes calldata params
+    ) external returns (bool) {
+        /*
+         * Flow:
+         * FlashLoan usdc to pay back debt
+         * Take out new debt in ETH, ensure eth value = _paybackAmount
+         * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
+         */
 
-    //     console.log("In flashloan func!");
+        console.log("In flashloan func!");
 
-    //     // This is how much usdc aave expects back + uniswap fee
-    //     uint256 _uniswapFee = Math.mulDiv(amount, uniPoolFee, feeDenominator);
-    //     uint256 _paybackAmount = amount + premium + _uniswapFee;
+        // DecimalNumber memory _amountInWei = addPrecision(
+        //     DecimalNumber({number: amount, decimals: IERC20Metadata(asset).decimals()}),
+        //     18
+        // );
+        // DecimalNumber memory _premiumInWei = addPrecision(
+        //     DecimalNumber({number: premium, decimals: IERC20Metadata(asset).decimals()}),
+        //     18
+        // );
 
-    //     console.log("Payback amount: %s", _paybackAmount);
+        // // This is how much usdc to borrow.
+        // // Existing debt + aave premium + uniswap fee + slippage
+        // DecimalNumber memory _uniswapFee = fixedMul(_amountInWei, UNI_POOL_FEE);
+        // DecimalNumber memory _slippage = fixedMul(_amountInWei, MAX_SLIPPAGE);
+        // DecimalNumber memory _borrowAmountInUSDC = DecimalNumber({
+        //     number: _amountInWei.number +
+        //         _premiumInWei.number +
+        //         _uniswapFee.number +
+        //         _slippage.number,
+        //     decimals: 18
+        // });
 
-    //     // pay back debt
-    //     pool.repay(asset, amount, 1, initiator);
+        // console.log("Borrow amount: %s", _borrowAmountInUSDC.number);
 
-    //     // take out new debt in eth
-    //     uint256 _newDebt = _priceToEth(_paybackAmount);
-    //     pool.borrow(address(weth), _newDebt, 1, 0, initiator);
+        // // pay back debt
+        // pool.repay(asset, amount, 1, initiator);
 
-    //     // swap borrowed eth to usdc
-    //     uint256 _amountIn = swapDebt(weth, usdc, _paybackAmount, router, pool);
+        // // take out new debt in eth
+        // DecimalNumber memory _newDebt = convertPriceDenomination(weth, usdc, _borrowAmountInUSDC);
+        // console.log("WETH borrow amount %s", _newDebt.number);
+        // pool.borrow(address(weth), _newDebt.number, 1, 0, initiator);
 
-    //     if (_amountIn < _paybackAmount) {
-    //         uint256 _leftOver = _paybackAmount - _amountIn;
-    //         weth.approve(address(pool), _leftOver);
-    //         pool.repay(address(weth), _leftOver, 1, address(this));
-    //     }
+        DecimalNumber memory _paybackAmountInWei = addPrecision(
+            DecimalNumber({number: amount + premium, decimals: IERC20Metadata(asset).decimals()}),
+            18
+        );
 
-    //     // Ensure pool can transfer back borrowed asset
-    //     usdc.approve(address(pool), _paybackAmount);
-    // }
+        // swap borrowed eth to usdc
+        // swapDebt does all the calculations for me lol
+        swapDebt(usdc, weth, _paybackAmountInWei, 1, 2);
 
-    /*
+        DecimalNumber memory _leftOverWeth = getBalanceOf(weth, address(this));
+
+        if (_leftOverWeth.number > 0) {
+            weth.approve(address(pool), _leftOverWeth.number);
+            pool.repay(address(weth), _leftOverWeth.number, 1, address(this));
+        }
+
+        // Ensure pool can transfer back borrowed asset
+        usdc.approve(address(pool), removePrecision(getBalanceOf(usdc, address(this)), 6).number);
+
+        return true;
+    }
+
     function ADDRESSES_PROVIDER() external view returns (IPoolAddressesProvider) {
         return pap;
     }
@@ -219,7 +248,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     function POOL() external view returns (IPool) {
         return pool;
     }
-
+    /*
     function loansInEth() public view returns (uint256) {
         (, uint256 _totalDebt, , , , ) = pool.getUserAccountData(address(this));
         return _priceToEth(_totalDebt);
