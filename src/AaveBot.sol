@@ -17,7 +17,7 @@ import "prb-math/contracts/PRBMathUD60x18.sol";
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
 
-contract AaveBot is AaveHelper, ERC4626 {
+contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     using Math for uint256;
 
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
@@ -138,6 +138,10 @@ contract AaveBot is AaveHelper, ERC4626 {
         // }
     }
 
+    /* ================================================================
+                            ERC4626 METHODS
+       ================================================================ */
+
     function totalAssets() public view override returns (uint256) {}
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {}
@@ -160,4 +164,88 @@ contract AaveBot is AaveHelper, ERC4626 {
 
         main();
     }
+
+    /* ================================================================
+                        FLASHLOAN FUNCTIONS
+       ================================================================ */
+
+    // function executeOperation(
+    //     address asset,
+    //     uint256 amount,
+    //     uint256 premium,
+    //     address initiator,
+    //     bytes calldata params
+    // ) external returns (bool) {
+    //     /*
+    //      * Flow:
+    //      * FlashLoan usdc to pay back debt
+    //      * Take out new debt in ETH, ensure eth value = _paybackAmount
+    //      * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
+    //      */
+
+    //     console.log("In flashloan func!");
+
+    //     // This is how much usdc aave expects back + uniswap fee
+    //     uint256 _uniswapFee = Math.mulDiv(amount, uniPoolFee, feeDenominator);
+    //     uint256 _paybackAmount = amount + premium + _uniswapFee;
+
+    //     console.log("Payback amount: %s", _paybackAmount);
+
+    //     // pay back debt
+    //     pool.repay(asset, amount, 1, initiator);
+
+    //     // take out new debt in eth
+    //     uint256 _newDebt = _priceToEth(_paybackAmount);
+    //     pool.borrow(address(weth), _newDebt, 1, 0, initiator);
+
+    //     // swap borrowed eth to usdc
+    //     uint256 _amountIn = swapDebt(weth, usdc, _paybackAmount, router, pool);
+
+    //     if (_amountIn < _paybackAmount) {
+    //         uint256 _leftOver = _paybackAmount - _amountIn;
+    //         weth.approve(address(pool), _leftOver);
+    //         pool.repay(address(weth), _leftOver, 1, address(this));
+    //     }
+
+    //     // Ensure pool can transfer back borrowed asset
+    //     usdc.approve(address(pool), _paybackAmount);
+    // }
+
+    /*
+    function ADDRESSES_PROVIDER() external view returns (IPoolAddressesProvider) {
+        return pap;
+    }
+
+    function POOL() external view returns (IPool) {
+        return pool;
+    }
+
+    function loansInEth() public view returns (uint256) {
+        (, uint256 _totalDebt, , , , ) = pool.getUserAccountData(address(this));
+        return _priceToEth(_totalDebt);
+    }
+
+    function depositsInEth() public view returns (uint256) {
+        (uint256 _totalCollateral, , , , , ) = pool.getUserAccountData(address(this));
+        return _priceToEth(_totalCollateral);
+    }
+
+    function _priceToEth(uint256 _priceInUsd) public view returns (uint256) {
+        uint256 _oraclePrice = oracle.getAssetPrice(address(weth));
+        uint256 _result = PRBMathUD60x18.div(_priceInUsd, _oraclePrice);
+        return _result;
+    }
+
+    function getLoanThresholds(address _asset) public view returns (uint256, uint256) {
+        uint256 bits = pool.getReserveData(_asset).configuration.data;
+        uint256 ltv = bits & LTV_BIT_MASK;
+        uint256 liqThresh = (bits >> 16) & LTV_BIT_MASK;
+
+        return (ltv, liqThresh);
+    }
+
+    function calcNewLoan(uint256 _deposits, uint256 _loanPercentage) public pure returns (uint256) {
+        return PRBMathUD60x18.mul(_deposits, _loanPercentage);
+    }
+    */
 }
