@@ -14,6 +14,7 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/protocol/libraries/types/DataTypes.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@solmate/tokens/WETH.sol";
 
 error AaveHelper__ConvertUSDCDecimalsDoNotMatch();
 error AaveHelper__ConvertAAVEDecimalsDoNotMatch();
@@ -40,6 +41,10 @@ contract AaveHelper {
     IPriceOracle public oracle;
     ISwapRouter public router;
 
+    /*
+     * Does all the calculations to borrow
+     * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
+     */
     function borrowAsset(
         IERC20Metadata _newDebtAsset,
         DecimalNumber memory _oldDebtAssetPriceUSD,
@@ -52,6 +57,7 @@ contract AaveHelper {
             _oldDebtAssetPriceUSD,
             _newDebtAssetPriceUSD
         );
+
         DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
             _newDebtAssetPriceUSD,
             _oldDebtAssetPriceUSD
@@ -70,7 +76,7 @@ contract AaveHelper {
         );
         DecimalNumber memory _slippage = fixedMul(_oldDebtAssetAmountInNewDebtAsset, MAX_SLIPPAGE);
         DecimalNumber memory _expectedBackInNewDebtAsset = removePrecision(
-            fixedSub(fixedSub(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
+            fixedAdd(fixedAdd(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
             _newDebtAsset.decimals()
         );
 
@@ -152,11 +158,7 @@ contract AaveHelper {
          * Old bet asset: usdc
          * New debt asset: eth
          * Swap to asset: usdc
-         */
-        // TODO: Should this take in the slippage % as param?
-        // TODO: Do the debt swap lol
-
-        /*
+         *
          * Get amount of debt quoted in debt asset
          * Check that this account has enough to pay off the debt
          * Intended to be used with flash loans.
@@ -170,50 +172,14 @@ contract AaveHelper {
             address(this)
         );
         DecimalNumber memory _oldDebtAssetPriceUSD = getAssetPrice(_oldDebtAsset);
+
+        // Repay the old debt asset. Account is entirely paid back.
         repayDebt(_oldDebtAsset, _amountOldDebtAssetBeforeSwap, _oldDebtAssetPriceUSD);
 
-        /*=================================================================================
-                                        TAKE NEW LOAN
-        =================================================================================*/
-
-        // TODO: Make new borrow in new debt asset
-        // TODO: How much do we need to borrow?
-        // Prob something like (totalDebtUSD + tradeSlippage + flashloanFeeUSD)/newDebtAssetUSD
-        // Maybe I pass in the required payback from flashloan as a param?
-
-        /*DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
-        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
-            _oldDebtAssetPriceUSD,
-            _newDebtAssetPriceUSD
-        );
-        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
-            _newDebtAssetPriceUSD,
-            _oldDebtAssetPriceUSD
-        );
-        DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
-            _amountOldDebtAssetBeforeSwap,
-            _oldDebtAssetPriceInNewDebtAsset
-        );
-        DecimalNumber memory _uniFeeInOldDebtAsset = fixedMul(
-            UNI_POOL_FEE,
-            _amountOldDebtAssetBeforeSwap
-        );
-        DecimalNumber memory _uniFeeInNewDebtAsset = fixedMul(
-            _oldDebtAssetPriceInNewDebtAsset,
-            _uniFeeInOldDebtAsset
-        );
-        DecimalNumber memory _slippage = fixedMul(_oldDebtAssetAmountInNewDebtAsset, MAX_SLIPPAGE);
-        DecimalNumber memory _expectedBackInNewDebtAsset = removePrecision(
-            fixedSub(fixedSub(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
-            _newDebtAsset.decimals()
-        );
-
-        DecimalNumber memory _newLoanAmount = fixedAdd(
-            _expectedBackInNewDebtAsset,
-            fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
-        );
-
-        pool.borrow(address(_newDebtAsset), _newLoanAmount.number, 1, 0, address(this));*/
+        /*
+         * Borrow using the new debt asset.
+         * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
+         */
         DecimalNumber memory _newLoanAmount = borrowAsset(
             _newDebtAsset,
             _oldDebtAssetPriceUSD,
@@ -222,6 +188,7 @@ contract AaveHelper {
             _rateType
         );
 
+        // Swap the borrowed new debt asset back to old debt asset to repay flash loan
         swapAssets(_newDebtAsset, _oldDebtAsset, _newLoanAmount);
     }
 

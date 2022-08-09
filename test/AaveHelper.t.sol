@@ -12,6 +12,7 @@ import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "aave-periphery/contracts/misc/interfaces/IUiPoolDataProviderV3.sol";
 import "aave-periphery/contracts/misc/interfaces/IWETHGateway.sol";
+import "@solmate/tokens/WETH.sol";
 
 import "src/AaveHelper.sol";
 
@@ -133,7 +134,29 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_result.decimals, 6, "Fixed-Point subtraction failed");
     }
 
-    function test_borrowAsset() public {}
+    function test_borrowAsset() public {
+        address(weth).call{value: wethAmount}("");
+
+        DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
+        DecimalNumber memory _wethPrice = getAssetPrice(weth);
+        DecimalNumber memory _wethAmount = balanceOf(weth, address(this));
+
+        // Get the amount of USDC that represents half of wethAmount
+        DecimalNumber memory _borrowAmount = fixedDiv(
+            fixedMul(_wethPrice, DecimalNumber({number: _wethAmount.number / 2, decimals: 18})),
+            _usdcPrice
+        );
+
+        console.log("WETH Price: %s", _wethPrice.number);
+        console.log("Borrow amt: %s", _borrowAmount.number);
+
+        weth.approve(address(pool), wethAmount);
+        pool.supply(address(weth), wethAmount, address(this), 0);
+
+        borrowAsset(weth, _usdcPrice, _borrowAmount, DecimalNumber({number: 0, decimals: 18}), 2);
+
+        assertGt(weth.balanceOf(address(this)), _wethAmount.number / 2);
+    }
 
     function test_repayDebt() public {
         vm.prank(address(weth));
