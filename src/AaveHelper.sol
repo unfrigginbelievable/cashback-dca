@@ -3,29 +3,24 @@ pragma solidity ^0.8.0;
 
 import "forge-std/console.sol";
 import "aave/contracts/interfaces/IPool.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "aave/contracts/interfaces/IPriceOracle.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "aave/contracts/protocol/libraries/types/DataTypes.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import "aave/contracts/interfaces/IPool.sol";
-import "aave/contracts/interfaces/IPriceOracle.sol";
-import "prb-math/contracts/PRBMathUD60x18.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
-import "aave/contracts/protocol/libraries/types/DataTypes.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "@solmate/tokens/WETH.sol";
 
-error AaveHelper__ConvertUSDCDecimalsDoNotMatch();
-error AaveHelper__ConvertAAVEDecimalsDoNotMatch();
-error AaveHelper__AssetMustHave18Decimals();
-error AaveHelper__SwapDecimalsDoNotMatch();
 error AaveHelper__DivDecimalsDoNotMatch();
 error AaveHelper__MulDecimalsDoNotMatch();
 error AaveHelper__SubDecimalsDoNotMatch();
 error AaveHelper__AddDecimalsDoNotMatch();
-error AaveHelper__ConversionOutsideBounds();
 error AaveHelper__NotEnoughToPayBackDebt();
+error AaveHelper__SwapDecimalsDoNotMatch();
+error AaveHelper__ConversionOutsideBounds();
+error AaveHelper__AssetMustHave18Decimals();
+error AaveHelper__ConvertUSDCDecimalsDoNotMatch();
+error AaveHelper__ConvertAAVEDecimalsDoNotMatch();
 
 contract AaveHelper {
     struct DecimalNumber {
@@ -88,12 +83,6 @@ contract AaveHelper {
             fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
         );
 
-        console.log("USDC in this contract %s", _amountOldDebtAssetBeforeSwap.number);
-        console.log("WETH price USD: %s", _newDebtAssetPriceUSD.number);
-        console.log("USDC price in WETH: %s", _oldDebtAssetPriceInNewDebtAsset.number);
-        console.log("WETH price in USDC: %s", _newDebtAssetPriceInOldDebtAsset.number);
-        console.log("USDC debt in WETH: %s", _oldDebtAssetAmountInNewDebtAsset.number);
-        console.log("New loan %s", _expectedBackInNewDebtAsset.number);
         pool.borrow(
             address(_newDebtAsset),
             _newLoanAmount.number,
@@ -180,8 +169,9 @@ contract AaveHelper {
         DecimalNumber memory _paybackAmount,
         uint256 _repayRateType,
         uint256 _borrowRateType
-    ) internal returns (uint256) {
+    ) internal {
         /*
+         * Example flow:
          * repay usdc debt, take out eth loan, swap eth to usdc, repay flash loan.
          * Old bet asset: usdc
          * New debt asset: eth
@@ -192,9 +182,6 @@ contract AaveHelper {
          * Intended to be used with flash loans.
          */
 
-        /*=================================================================================
-                                        REPAY DEBT
-        =================================================================================*/
         DecimalNumber memory _amountOldDebtAssetBeforeSwap = addPrecision(
             balanceOf(_oldDebtAsset, address(this)),
             18
@@ -217,7 +204,7 @@ contract AaveHelper {
 
         /*
          * Borrow using the new debt asset.
-         * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
+         * Will borrow debt amount + flashloan fee + uniswap fee + trade slippage in USD
          */
         DecimalNumber memory _newLoanAmount = borrowAsset(
             _newDebtAsset,
@@ -235,11 +222,9 @@ contract AaveHelper {
         );
     }
 
-    /*
-     * ==================================================================
-     * ===================== NUMBER CONVERSION UTILS ====================
-     * ==================================================================
-     */
+    /* ==================================================================
+                            NUMBER CONVERSION UTILS
+       ================================================================== */
 
     function convertAaveUintToWei(DecimalNumber memory _x)
         internal
@@ -309,6 +294,10 @@ contract AaveHelper {
         return DecimalNumber({number: _newNumber, decimals: _convertTo});
     }
 
+    /*  ==================================================================
+                                AAVE UTILS
+        ================================================================== */
+
     function getAssetPrice(IERC20Metadata _asset) internal view returns (DecimalNumber memory) {
         DecimalNumber memory _aavePrice = DecimalNumber({
             number: oracle.getAssetPrice(address(_asset)),
@@ -333,9 +322,9 @@ contract AaveHelper {
         return DecimalNumber({number: _token.balanceOf(_x), decimals: _token.decimals()});
     }
 
-    /* -------------------------------------------------------------------------------------
-                                    Math Functions
-       ------------------------------------------------------------------------------------*/
+    /* ==================================================================
+                                MATH FUNCTIONS
+       ================================================================== */
 
     function fixedDiv(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
