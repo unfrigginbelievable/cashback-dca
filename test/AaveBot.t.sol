@@ -49,7 +49,9 @@ contract AaveBotTest is Test, AaveHelper {
         oracle = IPriceOracle(bot.oracle());
     }
 
-    function test_Constructor() public {}
+    function test_Constructor() public {
+        assertEq(uint256(bot.debtStatus()), 0);
+    }
 
     // TODO: Test multiple depositors
     function test_deposit() public {
@@ -101,7 +103,7 @@ contract AaveBotTest is Test, AaveHelper {
 
         DecimalNumber memory _endingUSDCAmount = getBalanceOf(usdc, address(bot));
 
-        // TODO: assert that debt is switched to weth.
+        assertEq(uint256(bot.debtStatus()), 1);
     }
 
     // function testDepositToAave() public {

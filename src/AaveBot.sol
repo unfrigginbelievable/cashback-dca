@@ -20,6 +20,11 @@ error Strategy__WethTransferFailed();
 contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     using Math for uint256;
 
+    enum DebtStatus {
+        Stables,
+        weth
+    }
+
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
     uint256 public constant LTV_BIT_MASK = 65535;
     uint256 public constant LOW_HEALTH_THRESHOLD = 1.05 ether;
@@ -27,6 +32,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
 
+    DebtStatus public debtStatus;
     IERC20Metadata public immutable weth;
     IERC20Metadata public immutable usdc;
     IPoolAddressesProvider public immutable pap;
@@ -45,6 +51,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         weth = IERC20Metadata(_wethAddr);
         usdc = IERC20Metadata(_usdcAddr);
         router = ISwapRouter(_uniswapRouterAddr);
+        debtStatus = DebtStatus.Stables;
     }
 
     function main() public {
@@ -82,14 +89,15 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 _health
             ) = getUserDetails(address(this));
 
-            if (_health.number >= 1.05 ether) {
-                // TODO: Check if debt is in WETH and covert back to usdc
+            if (_health.number > LOW_HEALTH_THRESHOLD) {
                 /*
                  * new loan amount = (totalDeposit * maxBorrowPercent) - existingLoans
-                 *
-                 * Borrows must be requested in the borrowed asset's decimals.
-                 * MAX_BORROW * 10e11 gives correct precision for USDC.
                  */
+                if (debtStatus == DebtStatus.weth) {
+                    // TODO: Convert debt from weth -> stables here
+                    // TODO: set debtStatus = DebtStatus.Stables
+                }
+
                 DecimalNumber memory _newLoanUSD = calcNewLoan(_totalCollateralUSD, MAX_BORROW);
 
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
@@ -114,20 +122,21 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 }
             }
         }
-
         if (_health.number <= LOW_HEALTH_THRESHOLD) {
-            // TODO: Only run this if the debt is not already switched to eth
             /*
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
              * need to borrow (totalDebt * uniswapfee * uniswapslippage)
              */
-            console.log("HEALTH LOW...SWITCHING TO ETH DEBT");
-            DecimalNumber memory _totalDebtUSDC = removePrecision(
-                fixedDiv(_totalDebtUSD, getAssetPrice(usdc)),
-                6
-            );
-            pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
+            if (debtStatus == DebtStatus.Stables) {
+                console.log("HEALTH LOW...SWITCHING TO ETH DEBT");
+                DecimalNumber memory _totalDebtUSDC = removePrecision(
+                    fixedDiv(_totalDebtUSD, getAssetPrice(usdc)),
+                    6
+                );
+                pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
+                debtStatus = DebtStatus.weth;
+            }
         }
     }
 
