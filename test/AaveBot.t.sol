@@ -75,14 +75,60 @@ contract AaveBotTest is Test, AaveHelper {
     function test_lowHealth() public {
         test_deposit();
 
+        console.log("===================start lowhealth==========================");
+
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        // TODO: How low of a health value can we still borrow at?
         // push borrows past the low health threshold
-        vm.prank(address(bot));
-        pool.borrow(address(usdc), 80000000, 1, 0, address(bot));
+        // vm.prank(address(bot));
+        // pool.borrow(address(usdc), 80000000, 1, 0, address(bot));
 
-        (, , , , , uint256 health) = pool.getUserAccountData(address(bot));
-        console.log(health);
+        (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
+            address(bot)
+        );
+        console.log("Health: %s", health);
 
-        bot.main();
+        DecimalNumber memory _totalCollateralUSD = DecimalNumber({
+            number: _collat * 1e10,
+            decimals: 18
+        });
+        DecimalNumber memory _totalDebtUSD = DecimalNumber({
+            number: (_debt + 100000000) * 1e10,
+            decimals: 18
+        });
+        DecimalNumber memory _totalCollateralUSDC = fixedDiv(
+            _totalCollateralUSD,
+            getAssetPrice(usdc)
+        );
+        DecimalNumber memory _totalDebtUSDC = fixedDiv(_totalDebtUSD, getAssetPrice(usdc));
+        DecimalNumber memory _premium = fixedMul(
+            _totalDebtUSDC,
+            DecimalNumber({number: 0.0009 ether, decimals: 18})
+        );
+
+        // We need to give our contract slightly more than the amount of debt so it can be paid back.
+        // Simulates a flash loan
+        vm.prank(address(usdc));
+        usdc.transfer(address(bot), removePrecision(_totalDebtUSDC, 6).number);
+
+        bot.executeOperation(
+            address(usdc),
+            removePrecision(_totalDebtUSDC, 6).number,
+            removePrecision(_premium, 6).number,
+            address(bot),
+            ""
+        );
+
+        DecimalNumber memory _expectedUSDCAmount = removePrecision(
+            fixedAdd(_totalDebtUSD, _premium),
+            6
+        );
+        DecimalNumber memory _endingUSDCAmount = getBalanceOf(usdc, address(bot));
+
+        assertGe(_endingUSDCAmount.number, _expectedUSDCAmount.number);
     }
 
     // function testDepositToAave() public {

@@ -64,9 +64,10 @@ contract AaveHelper {
         return _xAmountAsY;
     }
 
-    /*
-     * Does all the calculations to borrow
-     * Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
+    /**
+        @dev Does all the calculations to borrow
+        @dev Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
+        @param _paybackAmount flashloan amount + flashloan premium
      */
     function borrowAsset(
         IERC20Metadata _newDebtAsset,
@@ -75,18 +76,8 @@ contract AaveHelper {
         DecimalNumber memory _paybackAmount,
         uint256 _borrowRateType
     ) internal returns (DecimalNumber memory) {
-        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
-
-        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
-            _oldDebtAssetPriceUSD,
-            _newDebtAssetPriceUSD
-        );
-
-        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
-            _newDebtAssetPriceUSD,
-            _oldDebtAssetPriceUSD
-        );
-
+        console.log("Borrowing asset");
+        /*
         DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
             _amountOldDebtAssetBeforeSwap,
             _oldDebtAssetPriceInNewDebtAsset
@@ -106,9 +97,33 @@ contract AaveHelper {
             _newDebtAsset.decimals()
         );
 
+        // DecimalNumber memory _newLoanAmount = fixedAdd(
+        //     _expectedBackInNewDebtAsset,
+        //     fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
+        // );
+        */
+        // _payBackAmount + uni fee + slippage
+        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
+
+        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
+            _oldDebtAssetPriceUSD,
+            _newDebtAssetPriceUSD
+        );
+        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
+            _newDebtAssetPriceUSD,
+            _oldDebtAssetPriceUSD
+        );
+
+        DecimalNumber memory _paybackAmountInNewDebtAsset = fixedDiv(
+            fixedMul(_oldDebtAssetPriceUSD, _paybackAmount),
+            _newDebtAssetPriceUSD
+        );
+
+        DecimalNumber memory _slippage = fixedMul(_paybackAmountInNewDebtAsset, MAX_SLIPPAGE);
+        DecimalNumber memory _uniFee = fixedMul(_paybackAmountInNewDebtAsset, UNI_POOL_FEE);
         DecimalNumber memory _newLoanAmount = fixedAdd(
-            _expectedBackInNewDebtAsset,
-            fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
+            _paybackAmountInNewDebtAsset,
+            fixedAdd(_slippage, _uniFee)
         );
 
         pool.borrow(
@@ -182,7 +197,7 @@ contract AaveHelper {
             tokenOut: address(_outAsset),
             fee: uint24(UNI_POOL_FEE.number / feeConverter),
             recipient: address(this),
-            deadline: block.timestamp,
+            deadline: block.timestamp + 15,
             amountInMaximum: _inAmountMax.number,
             amountOut: _outAmount.number,
             sqrtPriceLimitX96: 0
@@ -191,6 +206,13 @@ contract AaveHelper {
         return router.exactOutputSingle(params);
     }
 
+    /**
+    @param _oldDebtAsset asset that debt is currently held in
+    @param _newDebtAsset asset that debt should be swapped to
+    @param _paybackAmount Essentially the flashloan amount + flashloan premium
+    @param _repayRateType uint that represents the interest rate of old borrow. 1=stable, 2=variable
+    @param _borrowRateType uint that represents the interest rate of new borrow. 1=stable, 2=variable
+    */
     function swapDebt(
         IERC20Metadata _oldDebtAsset,
         IERC20Metadata _newDebtAsset,
@@ -216,6 +238,7 @@ contract AaveHelper {
         );
 
         DecimalNumber memory _oldDebtAssetPriceUSD = getAssetPrice(_oldDebtAsset);
+        DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
 
         DecimalNumber memory _debtInOldDebtAsset = fixedDiv(
             getTotalDebt(address(this)),
@@ -242,13 +265,14 @@ contract AaveHelper {
             _borrowRateType
         );
 
+        // Calculate how much was borrowed in terms of old asset
+        DecimalNumber memory _newLoanAmountInOldDebtAsset = fixedDiv(
+            fixedMul(_newDebtAssetPriceUSD, _newLoanAmount),
+            _oldDebtAssetPriceUSD
+        );
+
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
-        return
-            swapAssets(
-                _newDebtAsset,
-                _oldDebtAsset,
-                removePrecision(_newLoanAmount, _oldDebtAsset.decimals())
-            );
+        return swapAssets(_newDebtAsset, _oldDebtAsset, removePrecision(_paybackAmount, 6));
     }
 
     /* ==================================================================
@@ -294,13 +318,9 @@ contract AaveHelper {
             revert AaveHelper__ConversionOutsideBounds();
         }
 
-        console.log("CONVERT: %s, %s, %s", _x.number, _x.decimals, _convertTo);
-
         uint256 _removeDecimals = _x.decimals - _convertTo;
-        console.log("REMOVEDEC %s", _removeDecimals);
 
         uint256 _newNumber = _x.number / (10**_removeDecimals);
-        console.log("NEWNUM %s", _newNumber);
 
         return DecimalNumber({number: _newNumber, decimals: _convertTo});
     }
@@ -413,7 +433,7 @@ contract AaveHelper {
         if (_x.decimals != _y.decimals) {
             revert AaveHelper__DivDecimalsDoNotMatch();
         }
-        console.log("DIV: %s, %s", _x.number, _y.number);
+
         uint256 _scalar = 10**_x.decimals;
         uint256 _result = SafeMath.div(SafeMath.mul(_x.number, _scalar), _y.number);
         return DecimalNumber({number: _result, decimals: _x.decimals});
@@ -441,7 +461,7 @@ contract AaveHelper {
         if (_x.decimals != _y.decimals) {
             revert AaveHelper__SubDecimalsDoNotMatch();
         }
-        console.log("SUB: %s, %s", _x.number, _y.number);
+
         uint256 _result = _x.number - _y.number;
         return DecimalNumber({number: _result, decimals: _x.decimals});
     }
@@ -454,7 +474,7 @@ contract AaveHelper {
         if (_x.decimals != _y.decimals) {
             revert AaveHelper__AddDecimalsDoNotMatch();
         }
-        console.log("ADD: %s, %s", _x.number, _y.number);
+
         uint256 _result = _x.number + _y.number;
         return DecimalNumber({number: _result, decimals: _x.decimals});
     }
