@@ -64,47 +64,51 @@ contract AaveHelper {
         return _xAmountAsY;
     }
 
+    function swapAssets(
+        IERC20Metadata _inAsset,
+        IERC20Metadata _outAsset,
+        DecimalNumber memory _outAmount
+    ) internal returns (uint256) {
+        if (_outAsset.decimals() != _outAmount.decimals) {
+            revert AaveHelper__SwapDecimalsDoNotMatch();
+        }
+
+        DecimalNumber memory _inAmountMax = DecimalNumber({
+            number: _inAsset.balanceOf(address(this)),
+            decimals: _inAsset.decimals()
+        });
+
+        TransferHelper.safeApprove(address(_inAsset), address(router), _inAmountMax.number);
+
+        ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
+            tokenIn: address(_inAsset),
+            tokenOut: address(_outAsset),
+            fee: uint24(UNI_POOL_FEE.number / feeConverter),
+            recipient: address(this),
+            deadline: block.timestamp + 15,
+            amountInMaximum: _inAmountMax.number,
+            amountOut: _outAmount.number,
+            sqrtPriceLimitX96: 0
+        });
+
+        return router.exactOutputSingle(params);
+    }
+
     /**
-        @dev Does all the calculations to borrow
+        @dev Does all the calculations to borrow in terms of another asset
         @dev Matches old debt amount + flashloan fee + uniswap fee + trade slippage in USD
-        @param _paybackAmount flashloan amount + flashloan premium
+        @param _paybackAmountInOldDebtAsset flashloan amount + flashloan premium
      */
     function borrowAsset(
         IERC20Metadata _newDebtAsset,
         DecimalNumber memory _oldDebtAssetPriceUSD,
-        DecimalNumber memory _amountOldDebtAssetBeforeSwap,
-        DecimalNumber memory _paybackAmount,
+        DecimalNumber memory _paybackAmountInOldDebtAsset,
         uint256 _borrowRateType
     ) internal returns (DecimalNumber memory) {
-        console.log("Borrowing asset");
-        /*
-        DecimalNumber memory _oldDebtAssetAmountInNewDebtAsset = fixedMul(
-            _amountOldDebtAssetBeforeSwap,
-            _oldDebtAssetPriceInNewDebtAsset
-        );
-
-        DecimalNumber memory _uniFeeInOldDebtAsset = fixedMul(
-            UNI_POOL_FEE,
-            _amountOldDebtAssetBeforeSwap
-        );
-        DecimalNumber memory _uniFeeInNewDebtAsset = fixedMul(
-            _oldDebtAssetPriceInNewDebtAsset,
-            _uniFeeInOldDebtAsset
-        );
-        DecimalNumber memory _slippage = fixedMul(_oldDebtAssetAmountInNewDebtAsset, MAX_SLIPPAGE);
-        DecimalNumber memory _expectedBackInNewDebtAsset = removePrecision(
-            fixedAdd(fixedAdd(_oldDebtAssetAmountInNewDebtAsset, _uniFeeInNewDebtAsset), _slippage),
-            _newDebtAsset.decimals()
-        );
-
-        // DecimalNumber memory _newLoanAmount = fixedAdd(
-        //     _expectedBackInNewDebtAsset,
-        //     fixedDiv(_paybackAmount, _newDebtAssetPriceInOldDebtAsset)
-        // );
-        */
         // _payBackAmount + uni fee + slippage
         DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
 
+        /*
         DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
             _oldDebtAssetPriceUSD,
             _newDebtAssetPriceUSD
@@ -113,9 +117,9 @@ contract AaveHelper {
             _newDebtAssetPriceUSD,
             _oldDebtAssetPriceUSD
         );
-
+        */
         DecimalNumber memory _paybackAmountInNewDebtAsset = fixedDiv(
-            fixedMul(_oldDebtAssetPriceUSD, _paybackAmount),
+            fixedMul(_oldDebtAssetPriceUSD, _paybackAmountInOldDebtAsset),
             _newDebtAssetPriceUSD
         );
 
@@ -176,47 +180,17 @@ contract AaveHelper {
         });
     }
 
-    function swapAssets(
-        IERC20Metadata _inAsset,
-        IERC20Metadata _outAsset,
-        DecimalNumber memory _outAmount
-    ) internal returns (uint256) {
-        if (_outAsset.decimals() != _outAmount.decimals) {
-            revert AaveHelper__SwapDecimalsDoNotMatch();
-        }
-
-        DecimalNumber memory _inAmountMax = DecimalNumber({
-            number: _inAsset.balanceOf(address(this)),
-            decimals: _inAsset.decimals()
-        });
-
-        TransferHelper.safeApprove(address(_inAsset), address(router), _inAmountMax.number);
-
-        ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
-            tokenIn: address(_inAsset),
-            tokenOut: address(_outAsset),
-            fee: uint24(UNI_POOL_FEE.number / feeConverter),
-            recipient: address(this),
-            deadline: block.timestamp + 15,
-            amountInMaximum: _inAmountMax.number,
-            amountOut: _outAmount.number,
-            sqrtPriceLimitX96: 0
-        });
-
-        return router.exactOutputSingle(params);
-    }
-
     /**
     @param _oldDebtAsset asset that debt is currently held in
     @param _newDebtAsset asset that debt should be swapped to
-    @param _paybackAmount Essentially the flashloan amount + flashloan premium
+    @param _paybackAmountInOldDebtAsset Essentially the flashloan amount + flashloan premium
     @param _repayRateType uint that represents the interest rate of old borrow. 1=stable, 2=variable
     @param _borrowRateType uint that represents the interest rate of new borrow. 1=stable, 2=variable
     */
     function swapDebt(
         IERC20Metadata _oldDebtAsset,
         IERC20Metadata _newDebtAsset,
-        DecimalNumber memory _paybackAmount,
+        DecimalNumber memory _paybackAmountInOldDebtAsset,
         uint256 _repayRateType,
         uint256 _borrowRateType
     ) internal returns (uint256) {
@@ -231,6 +205,9 @@ contract AaveHelper {
          * Check that this account has enough to pay off the debt
          * Intended to be used with flash loans.
          */
+        if (_paybackAmountInOldDebtAsset.decimals != 18) {
+            revert AaveHelper__AssetMustHave18Decimals();
+        }
 
         DecimalNumber memory _amountOldDebtAssetBeforeSwap = addPrecision(
             getBalanceOf(_oldDebtAsset, address(this)),
@@ -260,10 +237,11 @@ contract AaveHelper {
         DecimalNumber memory _newLoanAmount = borrowAsset(
             _newDebtAsset,
             _oldDebtAssetPriceUSD,
-            _debtInOldDebtAsset,
-            _paybackAmount,
+            _paybackAmountInOldDebtAsset,
             _borrowRateType
         );
+
+        uint256 _wethBorrowUSDCAmt = _oldDebtAsset.balanceOf(address(this));
 
         // Calculate how much was borrowed in terms of old asset
         DecimalNumber memory _newLoanAmountInOldDebtAsset = fixedDiv(
@@ -272,7 +250,8 @@ contract AaveHelper {
         );
 
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
-        return swapAssets(_newDebtAsset, _oldDebtAsset, removePrecision(_paybackAmount, 6));
+
+        swapAssets(_newDebtAsset, _oldDebtAsset, removePrecision(_paybackAmountInOldDebtAsset, 6));
     }
 
     /* ==================================================================

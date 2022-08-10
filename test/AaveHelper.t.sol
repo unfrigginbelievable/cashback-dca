@@ -143,22 +143,23 @@ contract AaveHelperTest is Test, AaveHelper {
     function test_borrowAsset() public {
         address(weth).call{value: wethAmount}("");
 
+        uint256 _borrowAmountWETH = wethAmount / 2;
+
         DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
         DecimalNumber memory _wethPrice = getAssetPrice(weth);
-        DecimalNumber memory _wethAmount = getBalanceOf(weth, address(this));
 
         // Get the amount of USDC that represents half of wethAmount
-        DecimalNumber memory _borrowAmount = fixedDiv(
-            fixedMul(_wethPrice, DecimalNumber({number: _wethAmount.number / 2, decimals: 18})),
+        DecimalNumber memory _borrowAmountUSDC = fixedDiv(
+            fixedMul(_wethPrice, DecimalNumber({number: _borrowAmountWETH, decimals: 18})),
             _usdcPrice
         );
 
         weth.approve(address(pool), wethAmount);
         pool.supply(address(weth), wethAmount, address(this), 0);
 
-        borrowAsset(weth, _usdcPrice, _borrowAmount, DecimalNumber({number: 0, decimals: 18}), 2);
+        borrowAsset(weth, _usdcPrice, _borrowAmountUSDC, 2);
 
-        assertGt(weth.balanceOf(address(this)), _wethAmount.number / 2);
+        assertGt(weth.balanceOf(address(this)), wethAmount / 2);
     }
 
     function test_repayDebt() public {
@@ -205,34 +206,39 @@ contract AaveHelperTest is Test, AaveHelper {
     }
 
     function test_swapDebt() public {
-        address(weth).call{value: wethAmount}("");
+        address(weth).call{value: wethAmount * 2}("");
 
-        uint256 _borrowedUSDCAmount = 1300000000;
-        DecimalNumber memory _loanAmount = DecimalNumber({
-            number: _borrowedUSDCAmount,
+        DecimalNumber memory _loanAmount = DecimalNumber({number: 1300000000, decimals: 6});
+        DecimalNumber memory _paybackAmount = DecimalNumber({
+            number: _loanAmount.number + 2,
             decimals: 6
         });
 
         weth.approve(address(pool), wethAmount);
         pool.supply(address(weth), wethAmount, address(this), 0);
-        // 100 usdc
+
+        // Borrow USDC to get health below debt swap threshold
+        // Simulates flashloan. Initial loan amount + interest
         pool.borrow(address(usdc), _loanAmount.number, 1, 0, address(this));
+        // Only get enough usdc to cover the current debt
+        swapAssets(
+            weth,
+            usdc,
+            DecimalNumber({
+                number: _paybackAmount.number - usdc.balanceOf(address(this)),
+                decimals: 6
+            })
+        );
 
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
 
-        // Get some more USDC to cover interest accumulation
-        address(weth).call{value: wethAmount}("");
-        swapAssets(weth, usdc, _loanAmount);
-
-        swapDebt(usdc, weth, DecimalNumber({number: 0, decimals: 18}), 1, 2);
-
-        console.log("Borrowed USDC amount %s", _loanAmount.number);
-        console.log("Ending USDC amount %s", usdc.balanceOf(address(this)));
-
+        // Swap debt from usdc -> weth. Get back USDC to pay back flash loan.
+        swapDebt(usdc, weth, addPrecision(_paybackAmount, 18), 1, 2);
         uint256 _endingUSDCBal = usdc.balanceOf(address(this));
-        assertGt(_endingUSDCBal, _loanAmount.number);
-        assertApproxEqRel(_endingUSDCBal, _loanAmount.number, 0.01 ether);
+
+        assertGe(_endingUSDCBal, _paybackAmount.number);
+        assertApproxEqRel(_endingUSDCBal, _paybackAmount.number, 0.0001 ether);
     }
 }
