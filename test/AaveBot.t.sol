@@ -74,8 +74,15 @@ contract AaveBotTest is Test, AaveHelper {
 
     function test_lowHealth() public {
         test_deposit();
+        (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
+            address(bot)
+        );
 
-        console.log("===================start lowhealth==========================");
+        console.log("Old health factor %s", health);
+
+        // Get bot health very low
+        vm.prank(address(bot));
+        pool.borrow(address(usdc), 64000000, 1, 0, address(bot));
 
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);
@@ -86,49 +93,15 @@ contract AaveBotTest is Test, AaveHelper {
         // vm.prank(address(bot));
         // pool.borrow(address(usdc), 80000000, 1, 0, address(bot));
 
-        (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
-            address(bot)
-        );
-        console.log("Health: %s", health);
+        (_collat, _debt, , , , health) = pool.getUserAccountData(address(bot));
 
-        DecimalNumber memory _totalCollateralUSD = DecimalNumber({
-            number: _collat * 1e10,
-            decimals: 18
-        });
-        DecimalNumber memory _totalDebtUSD = DecimalNumber({
-            number: (_debt + 100000000) * 1e10,
-            decimals: 18
-        });
-        DecimalNumber memory _totalCollateralUSDC = fixedDiv(
-            _totalCollateralUSD,
-            getAssetPrice(usdc)
-        );
-        DecimalNumber memory _totalDebtUSDC = fixedDiv(_totalDebtUSD, getAssetPrice(usdc));
-        DecimalNumber memory _premium = fixedMul(
-            _totalDebtUSDC,
-            DecimalNumber({number: 0.0009 ether, decimals: 18})
-        );
+        console.log("New health factor %s", health);
 
-        // We need to give our contract slightly more than the amount of debt so it can be paid back.
-        // Simulates a flash loan
-        vm.prank(address(usdc));
-        usdc.transfer(address(bot), removePrecision(_totalDebtUSDC, 6).number);
+        bot.main();
 
-        bot.executeOperation(
-            address(usdc),
-            removePrecision(_totalDebtUSDC, 6).number,
-            removePrecision(_premium, 6).number,
-            address(bot),
-            ""
-        );
-
-        DecimalNumber memory _expectedUSDCAmount = removePrecision(
-            fixedAdd(_totalDebtUSD, _premium),
-            6
-        );
         DecimalNumber memory _endingUSDCAmount = getBalanceOf(usdc, address(bot));
 
-        assertGe(_endingUSDCAmount.number, _expectedUSDCAmount.number);
+        // TODO: assert that debt is switched to weth.
     }
 
     // function testDepositToAave() public {

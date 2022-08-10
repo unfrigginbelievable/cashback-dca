@@ -69,8 +69,6 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
         DecimalNumber memory _wethBalance = getBalanceOf(weth, address(this));
 
-        console.log("Contract eth bal %s", _wethBalance.number);
-
         if (_wethBalance.number >= 0.00001 ether) {
             weth.approve(address(pool), _wethBalance.number);
             pool.deposit(address(weth), _wethBalance.number, address(this), 0);
@@ -94,20 +92,11 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                  */
                 DecimalNumber memory _newLoanUSD = calcNewLoan(_totalCollateralUSD, MAX_BORROW);
 
-                console.log(
-                    "Total depoists USD %s, Available Borrows USD %s, New Loan USD: %s",
-                    _totalCollateralUSD.number,
-                    _availableBorrowsUSD.number,
-                    _newLoanUSD.number
-                );
-
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
                 DecimalNumber memory _borrowAmountUSDC = removePrecision(
                     fixedDiv(_newLoanUSD, _usdcPriceUSD),
                     6
                 );
-
-                console.log("Borrowing in USDC %s", _borrowAmountUSDC.number);
 
                 pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
                 uint256 _payoutPool = usdc.balanceOf(address(this));
@@ -123,20 +112,21 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                     usdcAmountOwed[depositors[i]] -= _depositorPayout;
                     usdc.transfer(depositors[i], _depositorPayout);
                 }
-                console.log("================GOT HERE=================");
             }
         }
 
         if (_health.number <= LOW_HEALTH_THRESHOLD) {
-            console.log("Start of low health block");
-
+            // TODO: Only run this if the debt is not already switched to eth
             /*
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
              * need to borrow (totalDebt * uniswapfee * uniswapslippage)
              */
-            DecimalNumber memory _totalDebtUSDC = fixedDiv(_totalDebtUSD, getAssetPrice(usdc));
-            console.log("Flashloaning USDC: %s", _totalDebtUSDC.number);
+            console.log("HEALTH LOW...SWITCHING TO ETH DEBT");
+            DecimalNumber memory _totalDebtUSDC = removePrecision(
+                fixedDiv(_totalDebtUSD, getAssetPrice(usdc)),
+                6
+            );
             pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
         }
     }
@@ -162,8 +152,6 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
         depositors.push(msg.sender);
         usdcAmountOwed[msg.sender] += _amountAsUsdc.number;
-        console.log("ETH price %s", _wethPriceUSD.number);
-        console.log("USDC amount owed: %s", _amountAsUsdc.number);
 
         main();
     }
