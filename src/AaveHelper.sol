@@ -1,7 +1,6 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "forge-std/console.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
@@ -70,8 +69,6 @@ contract AaveHelper {
         DecimalNumber memory _outAmount
     ) internal returns (uint256) {
         if (_outAsset.decimals() != _outAmount.decimals) {
-            console.log(_outAsset.name());
-            console.log(_outAmount.decimals);
             revert AaveHelper__SwapDecimalsDoNotMatch();
         }
 
@@ -110,16 +107,6 @@ contract AaveHelper {
         // _payBackAmount + uni fee + slippage
         DecimalNumber memory _newDebtAssetPriceUSD = getAssetPrice(_newDebtAsset);
 
-        /*
-        DecimalNumber memory _oldDebtAssetPriceInNewDebtAsset = fixedDiv(
-            _oldDebtAssetPriceUSD,
-            _newDebtAssetPriceUSD
-        );
-        DecimalNumber memory _newDebtAssetPriceInOldDebtAsset = fixedDiv(
-            _newDebtAssetPriceUSD,
-            _oldDebtAssetPriceUSD
-        );
-        */
         DecimalNumber memory _paybackAmountInNewDebtAsset = fixedDiv(
             fixedMul(_oldDebtAssetPriceUSD, _paybackAmountInOldDebtAsset),
             _newDebtAssetPriceUSD
@@ -165,7 +152,6 @@ contract AaveHelper {
         );
 
         if (_totalDebtInOldDebtAsset.number > _amountOldDebtAssetBeforeSwap.number) {
-            console.log(_totalDebtInOldDebtAsset.number);
             revert AaveHelper__NotEnoughToPayBackDebt();
         }
 

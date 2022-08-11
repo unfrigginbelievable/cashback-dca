@@ -18,8 +18,6 @@ contract AaveBotTest is Test, AaveHelper {
     AaveBot public bot;
     IERC20Metadata public weth;
     IERC20Metadata public usdc;
-    // IPool public pool;
-    // IPriceOracle public oracle;
     AggregatorV3Interface public chainlink;
     uint256 public wethAmount = 1 ether;
 
@@ -77,9 +75,6 @@ contract AaveBotTest is Test, AaveHelper {
 
     function test_lowHealth() public {
         test_deposit();
-        (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
-            address(bot)
-        );
 
         // Get bot health very low
         vm.prank(address(bot));
@@ -88,13 +83,6 @@ contract AaveBotTest is Test, AaveHelper {
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
-
-        // TODO: How low of a health value can we still borrow at?
-        // push borrows past the low health threshold
-        // vm.prank(address(bot));
-        // pool.borrow(address(usdc), 80000000, 1, 0, address(bot));
-
-        (_collat, _debt, , , , health) = pool.getUserAccountData(address(bot));
 
         bot.main();
 
@@ -105,7 +93,7 @@ contract AaveBotTest is Test, AaveHelper {
         // get bot into low health state
         test_lowHealth();
         assertEq(uint256(bot.debtStatus()), 1);
-        console.log("======================== GOT HERE TEST =======================");
+
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -114,120 +102,13 @@ contract AaveBotTest is Test, AaveHelper {
         address(weth).call{value: wethAmount}("");
         weth.approve(address(bot), wethAmount);
         bot.deposit(wethAmount, address(this));
-        console.log("DEPOSIT COMPLETE");
+
         //assert health is up AND debt is usdc again
         (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
             address(bot)
         );
-        console.log("Bot health %s", health);
-        assertEq(true, true);
+
+        assertGt(health, bot.LOW_HEALTH_THRESHOLD());
+        assertEq(uint256(bot.debtStatus()), 0);
     }
-
-    // function testDepositToAave() public {
-    //     uint256 _ethPrice = oracle.getAssetPrice(address(weth));
-
-    //     console.log("Price of eth %s", _ethPrice);
-
-    //     console.log(
-    //         "Price of eth in contract %s",
-    //         PRBMathUD60x18.mul(_ethPrice, wethAmount)
-    //     );
-
-    //     // Eth deposit to bot
-    //     vm.prank(address(weth));
-    //     weth.transfer(address(this), wethAmount);
-    //     uint256 _transferredWethAmount = weth.balanceOf(address(this));
-    //     assertEq(_transferredWethAmount, wethAmount, "Weth transfer failed");
-
-    //     // AAVE USES 8 DECIMALS NOW (IDK WHY)
-    //     // ALL RESERVES ARE QUOTED IN USD (IDK WHY)
-
-    //     console.log("Test contract addr %s", address(this));
-    //     weth.approve(address(bot), wethAmount);
-    //     bot.deposit(wethAmount, address(this));
-
-    //     assertEq(
-    //         bot.balanceOf(address(this)),
-    //         wethAmount,
-    //         "Vault did not mint correct amount of shares"
-    //     );
-
-    //     (
-    //         uint256 _totalCollateral,
-    //         uint256 _totalDebt,
-    //         uint256 _availableBorrows,
-    //         ,
-    //         ,
-    //         uint256 _health
-    //     ) = pool.getUserAccountData(address(bot));
-
-    //     assertEq(
-    //         bot.depositors(0),
-    //         address(this),
-    //         "User was not added to depositors list"
-    //     );
-
-    //     uint256 _expectedBorrowedUSDC = bot.calcNewLoan(
-    //         _totalCollateral,
-    //         bot.MAX_BORROW() * 10e13
-    //     );
-
-    //     // Determine how much USDC was owed before payout
-    //     uint256 _totalOwedUsdc = PRBMathUD60x18.mul(
-    //         wethAmount,
-    //         oracle.getAssetPrice(address(weth))
-    //     ) + _expectedBorrowedUSDC;
-
-    //     assertApproxEqRel(
-    //         bot.usdcAmountOwed(address(this)) + _expectedBorrowedUSDC,
-    //         _totalOwedUsdc,
-    //         0.005 ether,
-    //         "Owed USDC was not calculated properly"
-    //     );
-
-    //     assertEq(
-    //         bot.depositsInEth(),
-    //         wethAmount,
-    //         "Deposited eth does not match"
-    //     );
-
-    //     assertApproxEqRel(
-    //         usdc.balanceOf(address(this)) * 100,
-    //         _expectedBorrowedUSDC,
-    //         0.0001 ether,
-    //         "Borrowed USDC does not match amount sent back to this depositor"
-    //     );
-    // }
-
-    // function test_ExtractReserveMap() public {
-    //     (uint256 loan, uint256 thresh) = bot.getLoanThresholds(address(weth));
-
-    //     console.log("LTV: %s, LIQ: %s", loan, thresh);
-
-    //     assertEq(loan, 8000);
-    //     assertEq(thresh, 8250);
-    // }
-
-    // function test_calcNewLoan() public {
-    //     uint256 result = bot.calcNewLoan(bot.depositsInEth(), 80 ether);
-
-    //     assertEq(result, PRBMathUD60x18.mul(bot.depositsInEth(), 80 ether));
-    // }
-
-    // function test_BotRepay() public {
-    //     // Do I manipulate price at aave oracle or chain link oracle?
-    //     // Aave pulls directly from chainlink so prob chainlink
-    //     // Maybe I can use vm.mockCall to change chainlink lastRoundData()?
-    //     // Maybe I can deploy a mock chainlink interface, use prank to set aave oracle to use my fake oracle?
-    //     vm.mockCall(
-    //         address(chainlink),
-    //         abi.encodeWithSelector(chainlink.latestRoundData.selector),
-    //         abi.encode(0, 150000000000, block.timestamp, block.timestamp, 0)
-    //     );
-
-    //     // (, int256 result, , , ) = chainlink.latestRoundData();
-    //     uint256 result = oracle.getAssetPrice(address(weth));
-
-    //     assertEq(result, uint256(150000000000));
-    // }
 }

@@ -1,8 +1,6 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "forge-std/console.sol";
-
 import "./AaveHelper.sol";
 
 import "@solmate/mixins/ERC4626.sol";
@@ -19,15 +17,12 @@ error Strategy__WethTransferFailed();
 error Strategy__InitiatorNotContract();
 
 contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
-    using Math for uint256;
-
     enum DebtStatus {
         Stables,
         weth
     }
 
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
-    uint256 public constant LTV_BIT_MASK = 65535;
     uint256 public constant LOW_HEALTH_THRESHOLD = 1.05 ether;
 
     address[] public depositors;
@@ -70,16 +65,6 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     }
 
     function main() public {
-        /*
-            TODOS
-            -----
-            [x] Deposit any available WETH to aave
-                [] Check if debt is in weth and can be converted back to stables
-                [x] Take out a loan to available limit
-            [] Get contract health
-            [] Convert debt to WETH if health is low
-                [] need to flashloan to pay debt, eth loan to repay flashloan
-        */
         (
             DecimalNumber memory _totalCollateralUSD,
             DecimalNumber memory _totalDebtUSD,
@@ -204,7 +189,9 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         return _test.number;
     }
 
-    function beforeWithdraw(uint256 assets, uint256 shares) internal override {}
+    function beforeWithdraw(uint256 assets, uint256 shares) internal override {
+        // TODO: Implementation
+    }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
         DecimalNumber memory _wethAmount = DecimalNumber({number: assets, decimals: 18});

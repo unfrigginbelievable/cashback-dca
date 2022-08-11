@@ -10,23 +10,14 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "aave/contracts/protocol/libraries/types/DataTypes.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import "aave-periphery/contracts/misc/interfaces/IUiPoolDataProviderV3.sol";
-import "aave-periphery/contracts/misc/interfaces/IWETHGateway.sol";
-import "@solmate/tokens/WETH.sol";
 
 import "src/AaveHelper.sol";
 
 contract AaveHelperTest is Test, AaveHelper {
     IERC20Metadata public weth;
     IERC20Metadata public usdc;
-    IERC20Metadata public usdt;
     IERC20Metadata public dai;
-    IERC20Metadata public vArbWeth;
-    IERC20Metadata public sArbWeth;
-    IERC20Metadata public aArbWeth;
-    IUiPoolDataProviderV3 public poolData;
     IPoolAddressesProvider public pap;
-    IWETHGateway public wethGW;
     uint256 public wethAmount = 1 ether;
 
     string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
@@ -41,16 +32,10 @@ contract AaveHelperTest is Test, AaveHelper {
         usdc = IERC20Metadata(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
         pap = IPoolAddressesProvider(0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb);
         dai = IERC20Metadata(0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1);
-        usdt = IERC20Metadata(0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9);
-        vArbWeth = IERC20Metadata(0x0c84331e39d6658Cd6e6b9ba04736cC4c4734351);
-        aArbWeth = IERC20Metadata(0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8);
-        sArbWeth = IERC20Metadata(0xD8Ad37849950903571df17049516a5CD4cbE55F6);
 
         pool = IPool(pap.getPool());
         oracle = IPriceOracle(pap.getPriceOracle());
         router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
-        poolData = IUiPoolDataProviderV3(0x3f960bB91e85Ae2dB561BDd01B515C5A5c65802b);
-        wethGW = IWETHGateway(0xC09e69E79106861dF5d289dA88349f10e2dc6b5C);
     }
 
     function test_convertAAVEUnitToWei() public {
