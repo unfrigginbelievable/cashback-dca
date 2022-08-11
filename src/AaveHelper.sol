@@ -132,7 +132,7 @@ contract AaveHelper {
 
         pool.borrow(
             address(_newDebtAsset),
-            _newLoanAmount.number,
+            removePrecision(_newLoanAmount, _newDebtAsset.decimals()).number,
             _borrowRateType,
             0,
             address(this)

@@ -80,8 +80,6 @@ contract AaveBotTest is Test, AaveHelper {
             address(bot)
         );
 
-        console.log("Old health factor %s", health);
-
         // Get bot health very low
         vm.prank(address(bot));
         pool.borrow(address(usdc), 64000000, 1, 0, address(bot));
@@ -97,11 +95,7 @@ contract AaveBotTest is Test, AaveHelper {
 
         (_collat, _debt, , , , health) = pool.getUserAccountData(address(bot));
 
-        console.log("New health factor %s", health);
-
         bot.main();
-
-        DecimalNumber memory _endingUSDCAmount = getBalanceOf(usdc, address(bot));
 
         assertEq(uint256(bot.debtStatus()), 1);
     }

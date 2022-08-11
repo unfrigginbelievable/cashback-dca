@@ -16,6 +16,7 @@ import "prb-math/contracts/PRBMathUD60x18.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
+error Strategy__InitiatorNotContract();
 
 contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     using Math for uint256;
@@ -126,10 +127,9 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             /*
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
-             * need to borrow (totalDebt * uniswapfee * uniswapslippage)
+             * need to borrow (totalDebt + flashloan fee + uniswapfee + uniswapslippage)
              */
             if (debtStatus == DebtStatus.Stables) {
-                console.log("HEALTH LOW...SWITCHING TO ETH DEBT");
                 DecimalNumber memory _totalDebtUSDC = removePrecision(
                     fixedDiv(_totalDebtUSD, getAssetPrice(usdc)),
                     6
@@ -183,24 +183,38 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
          * Swap loaned ETH to usdc via uniswap. Again, ensure usdc = _paybackAmount
          */
 
-        DecimalNumber memory _paybackAmountInWei = addPrecision(
-            DecimalNumber({number: amount + premium, decimals: IERC20Metadata(asset).decimals()}),
-            18
-        );
+        if (initiator != address(this)) {
+            revert Strategy__InitiatorNotContract();
+        }
 
-        // swap borrowed eth to usdc
-        // swapDebt does all the calculations for me lol
-        uint256 _wethUsed = swapDebt(usdc, weth, _paybackAmountInWei, 1, 2);
+        if (debtStatus == DebtStatus.Stables) {
+            DecimalNumber memory _paybackAmountInWei = addPrecision(
+                DecimalNumber({
+                    number: amount + premium,
+                    decimals: IERC20Metadata(asset).decimals()
+                }),
+                18
+            );
 
-        DecimalNumber memory _leftOverWeth = getBalanceOf(weth, address(this));
-        // TODO: Pay back unused weth
-        // if (_leftOverWeth.number > 0) {
-        //     weth.approve(address(pool), _leftOverWeth.number);
-        //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
-        // }
+            // swap borrowed eth to usdc
+            // swapDebt does all the calculations for me lol
+            uint256 _wethUsed = swapDebt(usdc, weth, _paybackAmountInWei, 1, 2);
 
-        // Ensure pool can transfer back borrowed asset
-        usdc.approve(address(pool), removePrecision(getBalanceOf(usdc, address(this)), 6).number);
+            DecimalNumber memory _leftOverWeth = getBalanceOf(weth, address(this));
+            // TODO: Pay back unused weth
+            // if (_leftOverWeth.number > 0) {
+            //     weth.approve(address(pool), _leftOverWeth.number);
+            //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
+            // }
+
+            // Ensure pool can transfer back borrowed asset
+            usdc.approve(
+                address(pool),
+                removePrecision(getBalanceOf(usdc, address(this)), 6).number
+            );
+        } else if (debtStatus == DebtStatus.weth) {
+            // TODO: Swap from weth debt to usdc debt
+        }
 
         return true;
     }

@@ -141,6 +141,64 @@ contract AaveHelperTest is Test, AaveHelper {
     }
 
     function test_borrowAsset() public {
+        borrowAssetDAI();
+        borrowAssetUSDC();
+        borrowAssetWETH();
+    }
+
+    function borrowAssetDAI() public {
+        address(weth).call{value: wethAmount}("");
+
+        DecimalNumber memory _daiPrice = getAssetPrice(dai);
+        DecimalNumber memory _wethPrice = getAssetPrice(weth);
+
+        weth.approve(address(pool), wethAmount);
+        pool.supply(address(weth), wethAmount, address(this), 0);
+        DecimalNumber memory _borrowAmountWETH = DecimalNumber({
+            number: wethAmount / 2,
+            decimals: 18
+        });
+
+        borrowAsset(dai, _wethPrice, _borrowAmountWETH, 1);
+
+        DecimalNumber memory _expectedBorrowedDAI = fixedDiv(
+            fixedMul(_wethPrice, _borrowAmountWETH),
+            _daiPrice
+        );
+
+        assertGt(
+            dai.balanceOf(address(this)),
+            removePrecision(_expectedBorrowedDAI, dai.decimals()).number
+        );
+    }
+
+    function borrowAssetUSDC() public {
+        address(weth).call{value: wethAmount}("");
+
+        DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
+        DecimalNumber memory _wethPrice = getAssetPrice(weth);
+
+        weth.approve(address(pool), wethAmount);
+        pool.supply(address(weth), wethAmount, address(this), 0);
+        DecimalNumber memory _borrowAmountWETH = DecimalNumber({
+            number: wethAmount / 2,
+            decimals: 18
+        });
+
+        borrowAsset(usdc, _wethPrice, _borrowAmountWETH, 1);
+
+        DecimalNumber memory _expectedBorrowedUSDC = fixedDiv(
+            fixedMul(_wethPrice, _borrowAmountWETH),
+            _usdcPrice
+        );
+
+        assertGt(
+            usdc.balanceOf(address(this)),
+            removePrecision(_expectedBorrowedUSDC, usdc.decimals()).number
+        );
+    }
+
+    function borrowAssetWETH() public {
         address(weth).call{value: wethAmount}("");
 
         uint256 _borrowAmountWETH = wethAmount / 2;
