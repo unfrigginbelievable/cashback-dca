@@ -71,6 +71,7 @@ contract AaveBotTest is Test, AaveHelper {
 
         uint256 _howMuchBorrowed = usdc.balanceOf(address(this));
 
+        assertEq(bot.depositors(0), address(this));
         assertEq(_borrowAmountUSDC, _howMuchBorrowed);
     }
 
@@ -98,6 +99,28 @@ contract AaveBotTest is Test, AaveHelper {
         bot.main();
 
         assertEq(uint256(bot.debtStatus()), 1);
+    }
+
+    function test_RepayWethDebt() public {
+        // get bot into low health state
+        test_lowHealth();
+        assertEq(uint256(bot.debtStatus()), 1);
+        console.log("======================== GOT HERE TEST =======================");
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        // deposit enough weth to get bot back above low health thresh
+        address(weth).call{value: wethAmount}("");
+        weth.approve(address(bot), wethAmount);
+        bot.deposit(wethAmount, address(this));
+        console.log("DEPOSIT COMPLETE");
+        //assert health is up AND debt is usdc again
+        (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(
+            address(bot)
+        );
+        console.log("Bot health %s", health);
+        assertEq(true, true);
     }
 
     // function testDepositToAave() public {

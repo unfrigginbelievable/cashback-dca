@@ -55,6 +55,20 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         debtStatus = DebtStatus.Stables;
     }
 
+    function addToDepositors(address _user) internal {
+        bool _inDepositors = false;
+        for (uint256 i = 0; i < depositors.length; i++) {
+            if (depositors[i] == _user) {
+                _inDepositors = true;
+                break;
+            }
+        }
+
+        if (!_inDepositors) {
+            depositors.push(_user);
+        }
+    }
+
     function main() public {
         /*
             TODOS
@@ -80,7 +94,6 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         if (_wethBalance.number >= 0.00001 ether) {
             weth.approve(address(pool), _wethBalance.number);
             pool.deposit(address(weth), _wethBalance.number, address(this), 0);
-
             (
                 _totalCollateralUSD,
                 _totalDebtUSD,
@@ -95,11 +108,33 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                  * new loan amount = (totalDeposit * maxBorrowPercent) - existingLoans
                  */
                 if (debtStatus == DebtStatus.weth) {
-                    // TODO: Convert debt from weth -> stables here
-                    // TODO: set debtStatus = DebtStatus.Stables
+                    DecimalNumber memory _totalDebtWETH = fixedDiv(
+                        _totalDebtUSD,
+                        getAssetPrice(weth)
+                    );
+                    pool.flashLoanSimple(
+                        address(this),
+                        address(weth),
+                        _totalDebtWETH.number,
+                        "",
+                        0
+                    );
+                    debtStatus = DebtStatus.Stables;
+                    (
+                        _totalCollateralUSD,
+                        _totalDebtUSD,
+                        _availableBorrowsUSD,
+                        ,
+                        ,
+                        _health
+                    ) = getUserDetails(address(this));
                 }
 
-                DecimalNumber memory _newLoanUSD = calcNewLoan(_totalCollateralUSD, MAX_BORROW);
+                DecimalNumber memory _newLoanUSD = calcNewLoan(
+                    _totalCollateralUSD,
+                    _totalDebtUSD,
+                    MAX_BORROW
+                );
 
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
                 DecimalNumber memory _borrowAmountUSDC = removePrecision(
@@ -108,6 +143,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 );
 
                 pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
+
                 uint256 _payoutPool = usdc.balanceOf(address(this));
                 for (uint256 i = 0; i < depositors.length; i++) {
                     uint256 _sharePercentage = PRBMathUD60x18.div(
@@ -122,8 +158,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                     usdc.transfer(depositors[i], _depositorPayout);
                 }
             }
-        }
-        if (_health.number <= LOW_HEALTH_THRESHOLD) {
+        } else if (_health.number <= LOW_HEALTH_THRESHOLD) {
             /*
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
@@ -144,7 +179,30 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                             ERC4626 METHODS
        ================================================================ */
 
-    function totalAssets() public view override returns (uint256) {}
+    function totalAssets() public view override returns (uint256) {
+        /*
+         * TODO: NEEDS TESTING
+         * (depositAmountWeth - borrowedAmountWeth) * 0.8?
+         * must figure out how much weth the vault could actually get out
+         */
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        (
+            DecimalNumber memory _totalDepositUSD,
+            DecimalNumber memory _totalBorrowUSD,
+            ,
+            ,
+            ,
+
+        ) = getUserDetails(address(this));
+        DecimalNumber memory _totalDepositWETH = fixedDiv(_totalDepositUSD, _wethPriceUSD);
+        DecimalNumber memory _totalBorrowWETH = fixedDiv(_totalBorrowUSD, _wethPriceUSD);
+
+        DecimalNumber memory _test = fixedMul(
+            fixedSub(_totalDepositWETH, _totalBorrowWETH),
+            DecimalNumber({number: 0.8 ether, decimals: 18})
+        );
+        return _test.number;
+    }
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {}
 
@@ -159,9 +217,9 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             6
         );
 
-        depositors.push(msg.sender);
+        // What a depositor adds more than once?
+        addToDepositors(msg.sender);
         usdcAmountOwed[msg.sender] += _amountAsUsdc.number;
-
         main();
     }
 
@@ -214,6 +272,25 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             );
         } else if (debtStatus == DebtStatus.weth) {
             // TODO: Swap from weth debt to usdc debt
+            DecimalNumber memory _paybackAmountInWei = addPrecision(
+                DecimalNumber({
+                    number: amount + premium,
+                    decimals: IERC20Metadata(asset).decimals()
+                }),
+                18
+            );
+
+            uint256 _wethUsed = swapDebt(weth, usdc, _paybackAmountInWei, 2, 1);
+
+            DecimalNumber memory _leftOverUSDC = getBalanceOf(usdc, address(this));
+            // TODO: Pay back unused usdc
+            // if (_leftOverWeth.number > 0) {
+            //     weth.approve(address(pool), _leftOverWeth.number);
+            //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
+            // }
+
+            // Ensure pool can transfer back borrowed asset
+            weth.approve(address(pool), getBalanceOf(weth, address(this)).number);
         }
 
         return true;

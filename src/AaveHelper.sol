@@ -36,12 +36,12 @@ contract AaveHelper {
     IPriceOracle public oracle;
     ISwapRouter public router;
 
-    function calcNewLoan(DecimalNumber memory _deposits, DecimalNumber memory _loanPercentage)
-        internal
-        pure
-        returns (DecimalNumber memory)
-    {
-        return fixedMul(_deposits, _loanPercentage);
+    function calcNewLoan(
+        DecimalNumber memory _deposits,
+        DecimalNumber memory _borrows,
+        DecimalNumber memory _loanPercentage
+    ) internal pure returns (DecimalNumber memory) {
+        return fixedSub(fixedMul(_deposits, _loanPercentage), _borrows);
     }
 
     /// @dev get price of amount x quoted in y
@@ -70,6 +70,8 @@ contract AaveHelper {
         DecimalNumber memory _outAmount
     ) internal returns (uint256) {
         if (_outAsset.decimals() != _outAmount.decimals) {
+            console.log(_outAsset.name());
+            console.log(_outAmount.decimals);
             revert AaveHelper__SwapDecimalsDoNotMatch();
         }
 
@@ -251,7 +253,11 @@ contract AaveHelper {
 
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
 
-        swapAssets(_newDebtAsset, _oldDebtAsset, removePrecision(_paybackAmountInOldDebtAsset, 6));
+        swapAssets(
+            _newDebtAsset,
+            _oldDebtAsset,
+            removePrecision(_paybackAmountInOldDebtAsset, _oldDebtAsset.decimals())
+        );
     }
 
     /* ==================================================================
@@ -406,7 +412,7 @@ contract AaveHelper {
 
     function fixedDiv(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
-        view
+        pure
         returns (DecimalNumber memory)
     {
         if (_x.decimals != _y.decimals) {
@@ -434,7 +440,7 @@ contract AaveHelper {
 
     function fixedSub(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
-        view
+        pure
         returns (DecimalNumber memory)
     {
         if (_x.decimals != _y.decimals) {
@@ -447,7 +453,7 @@ contract AaveHelper {
 
     function fixedAdd(DecimalNumber memory _x, DecimalNumber memory _y)
         internal
-        view
+        pure
         returns (DecimalNumber memory)
     {
         if (_x.decimals != _y.decimals) {
