@@ -120,7 +120,6 @@ contract AaveBotTest is Test, AaveHelper {
         vm.roll(block.number + 1);
 
         uint256 _vaultShares = bot.balanceOf(address(this));
-        console.log(_vaultShares);
 
         DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
         DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
@@ -133,14 +132,17 @@ contract AaveBotTest is Test, AaveHelper {
         vm.prank(address(bot));
         pool.borrow(address(usdc), _newBorrowUSDC, 1, 0, address(bot));
 
+        (, , _availableBorrowsUSD, , , ) = pool.getUserAccountData(address(bot));
+
         // this should equal 0, or at least close
         DecimalNumber memory _availableWETH = DecimalNumber({
             number: bot.convertToAssets(_vaultShares),
             decimals: 18
         });
-        uint256 _result = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
 
-        assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
+        uint256 _resultUSD = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
+
+        assertApproxEqRel(_resultUSD, _availableBorrowsUSD, 0.034 ether);
     }
 
     function test_TotalAssets2() public {

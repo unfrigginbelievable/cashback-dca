@@ -172,7 +172,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         (
             DecimalNumber memory _totalDepositUSD,
             DecimalNumber memory _totalBorrowUSD,
-            ,
+            DecimalNumber memory _availableBorrowsUSD,
             ,
             ,
 
@@ -180,10 +180,12 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         DecimalNumber memory _totalDepositWETH = fixedDiv(_totalDepositUSD, _wethPriceUSD);
         DecimalNumber memory _totalBorrowWETH = fixedDiv(_totalBorrowUSD, _wethPriceUSD);
 
-        DecimalNumber memory _availableWETH = fixedSub(
-            fixedMul(_totalDepositWETH, DecimalNumber({number: 0.8 ether, decimals: 18})),
-            _totalBorrowWETH
-        );
+        // DecimalNumber memory _availableWETH = fixedSub(
+        //     fixedMul(_totalDepositWETH, DecimalNumber({number: 0.8 ether, decimals: 18})),
+        //     _totalBorrowWETH
+        // );
+
+        DecimalNumber memory _availableWETH = fixedDiv(_availableBorrowsUSD, _wethPriceUSD);
         return _availableWETH.number;
     }
 
