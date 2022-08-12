@@ -166,24 +166,10 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     function totalAssets() public view override returns (uint256) {
         /*
-         * (depositAmountWeth * 0.8) - borrowedAmountWeth
+         * availableBorrows / wethPrice
          */
         DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        (
-            DecimalNumber memory _totalDepositUSD,
-            DecimalNumber memory _totalBorrowUSD,
-            DecimalNumber memory _availableBorrowsUSD,
-            ,
-            ,
-
-        ) = getUserDetails(address(this));
-        DecimalNumber memory _totalDepositWETH = fixedDiv(_totalDepositUSD, _wethPriceUSD);
-        DecimalNumber memory _totalBorrowWETH = fixedDiv(_totalBorrowUSD, _wethPriceUSD);
-
-        // DecimalNumber memory _availableWETH = fixedSub(
-        //     fixedMul(_totalDepositWETH, DecimalNumber({number: 0.8 ether, decimals: 18})),
-        //     _totalBorrowWETH
-        // );
+        (, , DecimalNumber memory _availableBorrowsUSD, , , ) = getUserDetails(address(this));
 
         DecimalNumber memory _availableWETH = fixedDiv(_availableBorrowsUSD, _wethPriceUSD);
         return _availableWETH.number;
