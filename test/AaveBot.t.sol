@@ -111,4 +111,51 @@ contract AaveBotTest is Test, AaveHelper {
         assertGt(health, bot.LOW_HEALTH_THRESHOLD());
         assertEq(uint256(bot.debtStatus()), 0);
     }
+
+    function test_TotalAssets() public {
+        test_deposit();
+
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        uint256 _vaultShares = bot.balanceOf(address(this));
+        console.log(_vaultShares);
+
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+        (uint256 depositsUSD, uint256 _borrowsUSD, uint256 _availableBorrowsUSD, , , ) = pool
+            .getUserAccountData(address(bot));
+        uint256 _maxBorrow = PRBMathUD60x18.mul(depositsUSD, 0.8 ether);
+        uint256 _newBorrowUSD = _maxBorrow - _borrowsUSD;
+        uint256 _newBorrowUSDC = PRBMathUD60x18.div(_newBorrowUSD, _usdcPriceUSD.number) / 1e2;
+
+        vm.prank(address(bot));
+        pool.borrow(address(usdc), _newBorrowUSDC, 1, 0, address(bot));
+
+        // this should equal 0, or at least close
+        DecimalNumber memory _availableWETH = DecimalNumber({
+            number: bot.convertToAssets(_vaultShares),
+            decimals: 18
+        });
+        uint256 _result = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
+
+        assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
+    }
+
+    function test_TotalAssets2() public {
+        test_deposit();
+
+        uint256 _vaultShares = bot.balanceOf(address(this));
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        (, , uint256 _availableBorrowsUSD, , , ) = pool.getUserAccountData(address(bot));
+
+        DecimalNumber memory _availableWETH = DecimalNumber({
+            number: bot.convertToAssets(_vaultShares),
+            decimals: 18
+        });
+        uint256 _result = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
+
+        assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
+    }
 }

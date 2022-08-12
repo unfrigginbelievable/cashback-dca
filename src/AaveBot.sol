@@ -166,9 +166,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     function totalAssets() public view override returns (uint256) {
         /*
-         * TODO: NEEDS TESTING
-         * (depositAmountWeth - borrowedAmountWeth) * 0.8?
-         * must figure out how much weth the vault could actually get out
+         * (depositAmountWeth * 0.8) - borrowedAmountWeth
          */
         DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
         (
@@ -182,11 +180,11 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         DecimalNumber memory _totalDepositWETH = fixedDiv(_totalDepositUSD, _wethPriceUSD);
         DecimalNumber memory _totalBorrowWETH = fixedDiv(_totalBorrowUSD, _wethPriceUSD);
 
-        DecimalNumber memory _test = fixedMul(
-            fixedSub(_totalDepositWETH, _totalBorrowWETH),
-            DecimalNumber({number: 0.8 ether, decimals: 18})
+        DecimalNumber memory _availableWETH = fixedSub(
+            fixedMul(_totalDepositWETH, DecimalNumber({number: 0.8 ether, decimals: 18})),
+            _totalBorrowWETH
         );
-        return _test.number;
+        return _availableWETH.number;
     }
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
