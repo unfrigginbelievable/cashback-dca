@@ -59,9 +59,12 @@ contract AaveBotTest is Test, AaveHelper {
          * Test amount of weth deposited to aave
          * Test amount of usdc borrowed from aave
          * Test amount of usdc owed back to this contract
+         * Test amount borrowed not > max borrowed percent
          */
+
         // Get enough WETH that we can swap for exactly 1 WETH worth of USDC
         address(weth).call{value: wethAmount * 2}("");
+
         DecimalNumber memory _wethTradeAmount = DecimalNumber({number: wethAmount, decimals: 18});
         _wethTradeAmount = fixedAdd(
             _wethTradeAmount,
@@ -76,7 +79,7 @@ contract AaveBotTest is Test, AaveHelper {
             6
         );
 
-        swapAssets(weth, usdc, _minUSDCOut);
+        swapAssetsExactOutput(weth, usdc, _minUSDCOut);
 
         usdc.approve(address(bot), _minUSDCOut.number);
         bot.deposit(_minUSDCOut.number, address(this));
@@ -94,7 +97,7 @@ contract AaveBotTest is Test, AaveHelper {
         ) = getUserDetails(address(bot));
 
         DecimalNumber memory _depositsWETH = fixedDiv(_depositsUSD, _wethPrice);
-        DecimalNumber memory _borrowsUSDC = fixedDiv(_borrowsUSD, _usdcPrice);
+        DecimalNumber memory _borrowsUSDC = removePrecision(fixedDiv(_borrowsUSD, _usdcPrice), 6);
 
         (uint256 _borrowPercent, uint256 _borrowDecimals) = bot.MAX_BORROW();
         DecimalNumber memory _maxBorrowPercent = DecimalNumber({
@@ -103,22 +106,38 @@ contract AaveBotTest is Test, AaveHelper {
         });
 
         // (usdcIn - (UNI_FEE + Slippage)) * Max Borrow Percent
-        DecimalNumber memory _expectedBorrowsUSDC = fixedMul(
-            fixedSub(
-                addPrecision(_minUSDCOut, 18),
-                fixedAdd(
-                    fixedMul(addPrecision(_minUSDCOut, 18), UNI_POOL_FEE),
-                    fixedMul(addPrecision(_minUSDCOut, 18), MAX_SLIPPAGE)
-                )
+        DecimalNumber memory _expectedBorrowsUSDC = removePrecision(
+            fixedMul(
+                fixedSub(
+                    addPrecision(_minUSDCOut, 18),
+                    fixedAdd(
+                        fixedMul(addPrecision(_minUSDCOut, 18), UNI_POOL_FEE),
+                        fixedMul(addPrecision(_minUSDCOut, 18), MAX_SLIPPAGE)
+                    )
+                ),
+                _maxBorrowPercent
             ),
-            _maxBorrowPercent
+            6
         );
 
         assertEq(bot.depositors(0), address(this));
         assertEq(bot.balanceOf(address(this)), _minUSDCOut.number);
-        assertApproxEqRel(_depositsWETH.number, wethAmount, 0.0002 ether);
-        assertApproxEqRel(_borrowsUSDC.number, _expectedBorrowsUSDC.number, 0.0002 ether);
-        assertEq(usdc.balanceOf(address(this)), _borrowsUSDC.number);
+        assertGe(_depositsWETH.number, wethAmount, "WETH deposits does not match expected");
+        assertGe(
+            _borrowsUSDC.number,
+            _expectedBorrowsUSDC.number,
+            "Borrowed USDC does not match expected"
+        );
+        assertGe(
+            usdc.balanceOf(address(this)),
+            _borrowsUSDC.number,
+            "USDC balance paid out does not match expected"
+        );
+        assertLe(
+            _borrowsUSD.number,
+            fixedMul(_depositsUSD, _maxBorrowPercent).number,
+            "Borrowed more than expected"
+        );
     }
 
     function test_lowHealth() public {

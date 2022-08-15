@@ -259,16 +259,35 @@ contract AaveHelperTest is Test, AaveHelper {
         assertEq(_amountRepaid.decimals, 18);
     }
 
-    function test_swapAssets() public {
+    function test_swapAssetsExactOutput() public {
         address(weth).call{value: wethAmount}("");
 
         uint256 wethAmountBeforeSwap = weth.balanceOf(address(this));
         DecimalNumber memory _minBack = DecimalNumber({number: 1000000, decimals: 6});
 
-        swapAssets(weth, usdc, _minBack);
+        swapAssetsExactOutput(weth, usdc, _minBack);
 
         assertEq(usdc.balanceOf(address(this)), _minBack.number);
         assertLt(weth.balanceOf(address(this)), wethAmountBeforeSwap);
+    }
+
+    function test_swapAssetsExactInput() public {
+        address(weth).call{value: wethAmount}("");
+
+        DecimalNumber memory wethAmountBeforeSwap = DecimalNumber({
+            number: weth.balanceOf(address(this)),
+            decimals: 18
+        });
+
+        DecimalNumber memory _minBack = removePrecision(
+            calculateSwapOutAmount(weth, usdc, wethAmountBeforeSwap, UNI_POOL_FEE, MAX_SLIPPAGE),
+            6
+        );
+
+        swapAssetsExactInput(weth, usdc, _minBack);
+
+        assertGe(usdc.balanceOf(address(this)), _minBack.number);
+        assertEq(weth.balanceOf(address(this)), 0);
     }
 
     function test_swapDebt() public {
@@ -287,7 +306,7 @@ contract AaveHelperTest is Test, AaveHelper {
         // Simulates flashloan. Initial loan amount + interest
         pool.borrow(address(usdc), _loanAmount.number, 1, 0, address(this));
         // Only get enough usdc to cover the current debt
-        swapAssets(
+        swapAssetsExactOutput(
             weth,
             usdc,
             DecimalNumber({

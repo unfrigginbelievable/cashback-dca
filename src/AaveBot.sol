@@ -221,8 +221,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             UNI_POOL_FEE,
             MAX_SLIPPAGE
         );
-        swapAssets(usdc, weth, _wethOut);
-        console.log("AFTER DEPOSIT SWAP USDC AMOUNT %s", usdc.balanceOf(address(this)));
+        swapAssetsExactInput(usdc, weth, _wethOut);
+
         main();
     }
 

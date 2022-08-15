@@ -63,7 +63,37 @@ contract AaveHelper {
         return _xAmountAsY;
     }
 
-    function swapAssets(
+    function swapAssetsExactInput(
+        IERC20Metadata _inAsset,
+        IERC20Metadata _outAsset,
+        DecimalNumber memory _outAmount
+    ) internal returns (uint256) {
+        if (_outAsset.decimals() != _outAmount.decimals) {
+            revert AaveHelper__SwapDecimalsDoNotMatch();
+        }
+
+        DecimalNumber memory _inAmountMax = DecimalNumber({
+            number: _inAsset.balanceOf(address(this)),
+            decimals: _inAsset.decimals()
+        });
+
+        TransferHelper.safeApprove(address(_inAsset), address(router), _inAmountMax.number);
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+            tokenIn: address(_inAsset),
+            tokenOut: address(_outAsset),
+            fee: uint24(UNI_POOL_FEE.number / feeConverter),
+            recipient: address(this),
+            deadline: block.timestamp + 15,
+            amountIn: _inAmountMax.number,
+            amountOutMinimum: _outAmount.number,
+            sqrtPriceLimitX96: 0
+        });
+
+        return router.exactInputSingle(params);
+    }
+
+    function swapAssetsExactOutput(
         IERC20Metadata _inAsset,
         IERC20Metadata _outAsset,
         DecimalNumber memory _outAmount
@@ -254,7 +284,7 @@ contract AaveHelper {
 
         // Swap the borrowed new debt asset back to old debt asset to repay flash loan
 
-        swapAssets(
+        swapAssetsExactOutput(
             _newDebtAsset,
             _oldDebtAsset,
             removePrecision(_paybackAmountInOldDebtAsset, _oldDebtAsset.decimals())
