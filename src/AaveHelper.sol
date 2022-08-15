@@ -168,6 +168,21 @@ contract AaveHelper {
         });
     }
 
+    function calculateSwapOutAmount(
+        IERC20Metadata _inAsset,
+        IERC20Metadata _outAsset,
+        DecimalNumber memory _inAssetAmount,
+        DecimalNumber memory _tradeFee,
+        DecimalNumber memory _maxSlippage
+    ) internal view returns (DecimalNumber memory) {
+        // outAmount = inAssetAmount - (_tradeFee + _maxSlippage)
+        DecimalNumber memory _inAssetOut = fixedSub(
+            _inAssetAmount,
+            fixedAdd(fixedMul(_inAssetAmount, _tradeFee), fixedMul(_inAssetAmount, _maxSlippage))
+        );
+        return convertPriceDenomination(_inAsset, _outAsset, _inAssetOut);
+    }
+
     /**
     @param _oldDebtAsset asset that debt is currently held in
     @param _newDebtAsset asset that debt should be swapped to

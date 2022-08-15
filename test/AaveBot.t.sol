@@ -31,14 +31,14 @@ contract AaveBotTest is Test, AaveHelper {
 
         weth = IERC20Metadata(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
         usdc = IERC20Metadata(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
-
+        router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
         chainlink = AggregatorV3Interface(0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612);
 
         bot = new AaveBot(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
             address(weth),
             address(usdc),
-            0xE592427A0AEce92De3Edee1F18E0157C05861564,
+            address(router),
             "aavebot_shares",
             "ABS"
         );
@@ -53,24 +53,72 @@ contract AaveBotTest is Test, AaveHelper {
 
     // TODO: Test multiple depositors
     function test_deposit() public {
-        address(weth).call{value: wethAmount}("");
+        /*
+         * Test borrowers list
+         * Test vault shares sent to this contract
+         * Test amount of weth deposited to aave
+         * Test amount of usdc borrowed from aave
+         * Test amount of usdc owed back to this contract
+         */
+        // Get enough WETH that we can swap for exactly 1 WETH worth of USDC
+        address(weth).call{value: wethAmount * 2}("");
+        DecimalNumber memory _wethTradeAmount = DecimalNumber({number: wethAmount, decimals: 18});
+        _wethTradeAmount = fixedAdd(
+            _wethTradeAmount,
+            fixedAdd(
+                fixedMul(_wethTradeAmount, UNI_POOL_FEE),
+                fixedMul(_wethTradeAmount, MAX_SLIPPAGE)
+            )
+        );
 
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+        DecimalNumber memory _minUSDCOut = removePrecision(
+            convertPriceDenomination(weth, usdc, _wethTradeAmount),
+            6
+        );
 
-        uint256 _wethPriceUSDC = PRBMathUD60x18.div(_wethPriceUSD.number, _usdcPriceUSD.number);
-        uint256 _borrowAmountUSDC = PRBMathUD60x18.mul(
-            PRBMathUD60x18.mul(_wethPriceUSDC, wethAmount),
-            7500 * (1e14)
-        ) / 1e12;
+        swapAssets(weth, usdc, _minUSDCOut);
 
-        weth.approve(address(bot), wethAmount);
-        bot.deposit(wethAmount, address(this));
+        usdc.approve(address(bot), _minUSDCOut.number);
+        bot.deposit(_minUSDCOut.number, address(this));
 
-        uint256 _howMuchBorrowed = usdc.balanceOf(address(this));
+        DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
+        DecimalNumber memory _wethPrice = getAssetPrice(weth);
+
+        (
+            DecimalNumber memory _depositsUSD,
+            DecimalNumber memory _borrowsUSD,
+            ,
+            ,
+            ,
+
+        ) = getUserDetails(address(bot));
+
+        DecimalNumber memory _depositsWETH = fixedDiv(_depositsUSD, _wethPrice);
+        DecimalNumber memory _borrowsUSDC = fixedDiv(_borrowsUSD, _usdcPrice);
+
+        (uint256 _borrowPercent, uint256 _borrowDecimals) = bot.MAX_BORROW();
+        DecimalNumber memory _maxBorrowPercent = DecimalNumber({
+            number: _borrowPercent,
+            decimals: _borrowDecimals
+        });
+
+        // (usdcIn - (UNI_FEE + Slippage)) * Max Borrow Percent
+        DecimalNumber memory _expectedBorrowsUSDC = fixedMul(
+            fixedSub(
+                addPrecision(_minUSDCOut, 18),
+                fixedAdd(
+                    fixedMul(addPrecision(_minUSDCOut, 18), UNI_POOL_FEE),
+                    fixedMul(addPrecision(_minUSDCOut, 18), MAX_SLIPPAGE)
+                )
+            ),
+            _maxBorrowPercent
+        );
 
         assertEq(bot.depositors(0), address(this));
-        assertEq(_borrowAmountUSDC, _howMuchBorrowed);
+        assertEq(bot.balanceOf(address(this)), _minUSDCOut.number);
+        assertApproxEqRel(_depositsWETH.number, wethAmount, 0.0002 ether);
+        assertApproxEqRel(_borrowsUSDC.number, _expectedBorrowsUSDC.number, 0.0002 ether);
+        assertEq(usdc.balanceOf(address(this)), _borrowsUSDC.number);
     }
 
     function test_lowHealth() public {
@@ -112,6 +160,9 @@ contract AaveBotTest is Test, AaveHelper {
         assertEq(uint256(bot.debtStatus()), 0);
     }
 
+    /**
+        @dev tests the totalAssets after a borrow to the pool max limit is made
+     */
     function test_TotalAssets() public {
         test_deposit();
 
@@ -145,6 +196,9 @@ contract AaveBotTest is Test, AaveHelper {
         assertApproxEqRel(_resultUSD, _availableBorrowsUSD, 0.034 ether);
     }
 
+    /**
+        @dev tests the totalAssets after a standard deposit
+     */
     function test_TotalAssets2() public {
         test_deposit();
 
@@ -159,6 +213,12 @@ contract AaveBotTest is Test, AaveHelper {
         uint256 _result = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
 
         assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
+    }
+
+    function test_totalAssets3() public {
+        uint256 _result = bot.totalAssets();
+        assertEq(_result, 0);
+        test_deposit();
     }
 
     function test_redeem() public {

@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import "./AaveHelper.sol";
 
+import "forge-std/console.sol";
+
 import "@solmate/mixins/ERC4626.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
@@ -40,7 +42,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         address _uniswapRouterAddr,
         string memory _name,
         string memory _symbol
-    ) ERC4626(ERC20(_wethAddr), _name, _symbol) {
+    ) ERC4626(ERC20(_usdcAddr), _name, _symbol) {
         pap = IPoolAddressesProvider(_papAddr);
         pool = IPool(pap.getPool());
         oracle = IPriceOracle(pap.getPriceOracle());
@@ -165,43 +167,62 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
        ================================================================ */
 
     function totalAssets() public view override returns (uint256) {
+        // TODO: Should this be multiplied by max borrow?
         /*
-         * availableBorrows / wethPrice
+         * availableBorrows / usdcPrice
          */
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        (, , DecimalNumber memory _availableBorrowsUSD, , , ) = getUserDetails(address(this));
+        (
+            ,
+            ,
+            DecimalNumber memory _availableBorrowsUSD,
+            ,
+            ,
+            DecimalNumber memory _health
+        ) = getUserDetails(address(this));
 
-        DecimalNumber memory _availableWETH = fixedDiv(_availableBorrowsUSD, _wethPriceUSD);
-        return _availableWETH.number;
+        if (_health.number <= LOW_HEALTH_THRESHOLD) {
+            return 0;
+        } else {
+            DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+            DecimalNumber memory _availableUSDC = fixedDiv(_availableBorrowsUSD, _usdcPriceUSD);
+            return _availableUSDC.number;
+        }
     }
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
         // TODO: Implementation
+        // TODO: Do assets need to be subracted from users pending payouts, or added?
         /*
+         * The amount of assets passed in will scale based on health of the vault.
+         * If vault health < low threhold, the assets should be zero.
          * I think I need to look at redeem() not withdraw
-         * Pay depositor out their weth balance by withdrawing the weth from pool
-         * Use "trapped" weth to pay off debts (but how to track)
+         * Pay depositor out their usdc balance by borrowing from pool
+         * Use "untracked" weth to pay off debts (but how to track)
          */
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
         (DecimalNumber memory _depositsUSD, , , , , ) = getUserDetails(address(this));
-        usdcAmountOwed[msg.sender] = 0;
-        pool.withdraw(address(weth), assets, address(this));
+        usdcAmountOwed[msg.sender] += assets;
+        main();
     }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
-        DecimalNumber memory _wethAmount = DecimalNumber({number: assets, decimals: 18});
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+        addToDepositors(msg.sender);
+        usdcAmountOwed[msg.sender] += assets;
 
-        // (_wethAmount * _wethPriceUSD) / _usdcPriceUSD -> to six decimal places
-        DecimalNumber memory _amountAsUsdc = removePrecision(
-            fixedDiv(fixedMul(_wethAmount, _wethPriceUSD), _usdcPriceUSD),
-            6
+        DecimalNumber memory _decAssets = addPrecision(
+            DecimalNumber({number: assets, decimals: asset.decimals()}),
+            18
         );
 
-        // What a depositor adds more than once?
-        addToDepositors(msg.sender);
-        usdcAmountOwed[msg.sender] += _amountAsUsdc.number;
+        DecimalNumber memory _wethOut = calculateSwapOutAmount(
+            usdc,
+            weth,
+            _decAssets,
+            UNI_POOL_FEE,
+            MAX_SLIPPAGE
+        );
+        swapAssets(usdc, weth, _wethOut);
+        console.log("AFTER DEPOSIT SWAP USDC AMOUNT %s", usdc.balanceOf(address(this)));
         main();
     }
 

@@ -38,6 +38,29 @@ contract AaveHelperTest is Test, AaveHelper {
         router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
     }
 
+    function test_calculateSwapOutAmount() public {
+        DecimalNumber memory _inAmount = DecimalNumber({number: wethAmount, decimals: 18});
+        DecimalNumber memory _tradeFee = DecimalNumber({number: 0.1 ether, decimals: 18});
+        DecimalNumber memory _maxSlippage = DecimalNumber({number: 0.1 ether, decimals: 18});
+        DecimalNumber memory _expectedResult = convertPriceDenomination(
+            weth,
+            usdc,
+            fixedSub(
+                _inAmount,
+                fixedAdd(fixedMul(_inAmount, _tradeFee), fixedMul(_inAmount, _maxSlippage))
+            )
+        );
+        DecimalNumber memory _result = calculateSwapOutAmount(
+            weth,
+            usdc,
+            _inAmount,
+            _tradeFee,
+            _maxSlippage
+        );
+
+        assertEq(_result.number, _expectedResult.number);
+    }
+
     function test_convertAAVEUnitToWei() public {
         DecimalNumber memory _aaveWethPrice = DecimalNumber({number: 1650 * 1e8, decimals: 8});
         DecimalNumber memory _result = convertAaveUintToWei(_aaveWethPrice);
