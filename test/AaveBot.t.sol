@@ -160,4 +160,35 @@ contract AaveBotTest is Test, AaveHelper {
 
         assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
     }
+
+    function test_redeem() public {
+        test_deposit();
+
+        uint256 _vaultShares = bot.balanceOf(address(this));
+
+        bot.redeem(_vaultShares, address(this), address(this));
+
+        (, , uint256 _availableBorrowsUSD, , , uint256 _health) = pool.getUserAccountData(
+            address(bot)
+        );
+
+        uint256 _minExpectedWETH = PRBMathUD60x18.mul(wethAmount, 0.8 ether);
+        DecimalNumber memory _usdcBalance = addPrecision(getBalanceOf(usdc, address(this)), 18);
+        DecimalNumber memory _usdcAsWETH = convertPriceDenomination(usdc, weth, _usdcBalance);
+        uint256 result = weth.balanceOf(address(this)) + _usdcAsWETH.number;
+
+        assertApproxEqRel(
+            weth.balanceOf(address(this)) + _usdcAsWETH.number,
+            _minExpectedWETH,
+            0.001 ether
+        );
+
+        assertEq(bot.usdcAmountOwed(address(this)), 0);
+
+        console.log(_health);
+
+        bot.main();
+
+        console.log(uint256(bot.debtStatus()));
+    }
 }

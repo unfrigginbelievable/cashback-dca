@@ -177,6 +177,15 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
         // TODO: Implementation
+        /*
+         * I think I need to look at redeem() not withdraw
+         * Pay depositor out their weth balance by withdrawing the weth from pool
+         * Use "trapped" weth to pay off debts (but how to track)
+         */
+        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
+        (DecimalNumber memory _depositsUSD, , , , , ) = getUserDetails(address(this));
+        usdcAmountOwed[msg.sender] = 0;
+        pool.withdraw(address(weth), assets, address(this));
     }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
