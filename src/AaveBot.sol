@@ -51,20 +51,9 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         debtStatus = DebtStatus.Stables;
     }
 
-    function addToDepositors(address _user) internal {
-        bool _inDepositors = false;
-        for (uint256 i = 0; i < depositors.length; i++) {
-            if (depositors[i] == _user) {
-                _inDepositors = true;
-                break;
-            }
-        }
-
-        if (!_inDepositors) {
-            depositors.push(_user);
-        }
-    }
-
+    /* ================================================================
+                            Main Functionality
+       ================================================================ */
     function main() public {
         (
             DecimalNumber memory _totalCollateralUSD,
@@ -201,7 +190,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
-        addToDepositors(msg.sender);
+        addDepositor(msg.sender);
         usdcAmountOwed[msg.sender] += assets;
 
         DecimalNumber memory _decAssets = addPrecision(
@@ -304,6 +293,20 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
        ================================================================ */
     // Shamelessly stolen from: https://solidity-by-example.org/array/
     // Last element copied over the element we want to delete, then we pop the last element
+    function addDepositor(address _user) internal {
+        bool _inDepositors = false;
+        for (uint256 i = 0; i < depositors.length; i++) {
+            if (depositors[i] == _user) {
+                _inDepositors = true;
+                break;
+            }
+        }
+
+        if (!_inDepositors) {
+            depositors.push(_user);
+        }
+    }
+
     function removeDepositor(address _depositor) internal {
         uint256 removeIndex = findIndexOfDepositor(_depositor);
         depositors[removeIndex] = depositors[depositors.length - 1];
