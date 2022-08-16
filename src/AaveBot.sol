@@ -131,20 +131,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
                 pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
 
-                uint256 _payoutPool = usdc.balanceOf(address(this));
-                for (uint256 i = 0; i < depositors.length; i++) {
-                    uint256 _sharePercentage = PRBMathUD60x18.div(
-                        this.balanceOf(depositors[i]),
-                        this.totalSupply()
-                    );
-                    uint256 _depositorPayout = Math.min(
-                        usdcAmountOwed[depositors[i]],
-                        PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
-                    );
-                    usdcAmountOwed[depositors[i]] -= _depositorPayout;
-                    usdcAmountPaid[depositors[i]] += _depositorPayout;
-                    usdc.transfer(depositors[i], _depositorPayout);
-                }
+                executePayouts();
             }
         } else if (_health.number <= LOW_HEALTH_THRESHOLD) {
             /*
@@ -160,6 +147,31 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 pool.flashLoanSimple(address(this), address(usdc), _totalDebtUSDC.number, "", 0);
                 debtStatus = DebtStatus.weth;
             }
+        }
+    }
+
+    function executePayouts() internal {
+        uint256 _payoutPool = usdc.balanceOf(address(this));
+        for (uint256 i = 0; i < depositors.length; i++) {
+            uint256 _userShares = this.balanceOf(depositors[i]);
+            uint256 _usdcOwed = usdcAmountOwed[depositors[i]];
+
+            // Remove the depositor if they no longer are owed any money and have no stake in vault
+            if (_userShares == 0 && _usdcOwed == 0) {
+                console.log("Removing %s", depositors[i]);
+                removeDepositor(depositors[i]);
+                continue;
+            }
+
+            uint256 _sharePercentage = PRBMathUD60x18.div(_userShares, this.totalSupply());
+            uint256 _depositorPayout = Math.min(
+                _usdcOwed,
+                PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
+            );
+
+            usdcAmountOwed[depositors[i]] -= _depositorPayout;
+            usdcAmountPaid[depositors[i]] += _depositorPayout;
+            usdc.transfer(depositors[i], _depositorPayout);
         }
     }
 
@@ -289,5 +301,25 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     function POOL() external view returns (IPool) {
         return pool;
+    }
+
+    /* ================================================================
+                                    MISC
+       ================================================================ */
+    // Shamelessly stolen from: https://solidity-by-example.org/array/
+    // Last element copied over the element we want to delete, then we pop the last element
+    function removeDepositor(address _depositor) internal {
+        uint256 removeIndex = findIndexOfDepositor(_depositor);
+        depositors[removeIndex] = depositors[depositors.length - 1];
+        depositors.pop();
+    }
+
+    function findIndexOfDepositor(address _depositor) internal returns (uint256 index) {
+        for (uint256 i = 0; i < depositors.length; i++) {
+            if (depositors[i] == _depositor) {
+                index = i;
+                break;
+            }
+        }
     }
 }

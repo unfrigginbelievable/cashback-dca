@@ -166,15 +166,15 @@ contract AaveBotTest is Test, AaveHelper {
             _expectedBorrowsUSDC.number,
             "Borrowed USDC does not match expected"
         );
-        assertGe(
-            usdc.balanceOf(address(this)),
-            _borrowsUSDC.number,
-            "USDC balance paid out does not match expected"
-        );
         assertLe(
             _borrowsUSD.number,
             fixedMul(_depositsUSD, _maxBorrowPercent).number,
             "Borrowed more than expected"
+        );
+        assertGe(
+            usdc.balanceOf(address(this)),
+            _borrowsUSDC.number,
+            "USDC balance paid out does not match expected"
         );
         assertApproxEqRel(
             bot.usdcAmountOwed(address(this)),
