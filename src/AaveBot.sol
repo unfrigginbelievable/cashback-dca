@@ -78,6 +78,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
         DecimalNumber memory _wethBalance = getBalanceOf(weth, address(this));
 
+        // Deposit weth to AAVE
         if (_wethBalance.number >= 0.00001 ether) {
             weth.approve(address(pool), _wethBalance.number);
             pool.deposit(address(weth), _wethBalance.number, address(this), 0);
@@ -89,55 +90,54 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 ,
                 _health
             ) = getUserDetails(address(this));
+        }
 
-            if (_health.number > LOW_HEALTH_THRESHOLD) {
+        // Payout depositors if new borrow can be made
+        if (_health.number > LOW_HEALTH_THRESHOLD) {
+            /*
+             * new loan amount = (totalDeposit * maxBorrowPercent) - existingLoans
+             */
+            if (debtStatus == DebtStatus.weth) {
                 /*
-                 * new loan amount = (totalDeposit * maxBorrowPercent) - existingLoans
+                 * Converts weth debt into usdc debt.
+                 * See executeOperation() below.
                  */
-                if (debtStatus == DebtStatus.weth) {
-                    DecimalNumber memory _totalDebtWETH = fixedDiv(
-                        _totalDebtUSD,
-                        getAssetPrice(weth)
-                    );
-                    pool.flashLoanSimple(
-                        address(this),
-                        address(weth),
-                        _totalDebtWETH.number,
-                        "",
-                        0
-                    );
-                    debtStatus = DebtStatus.Stables;
-                    (
-                        _totalCollateralUSD,
-                        _totalDebtUSD,
-                        _availableBorrowsUSD,
-                        ,
-                        ,
-                        _health
-                    ) = getUserDetails(address(this));
-                }
-
-                DecimalNumber memory _newLoanUSD = calcNewLoan(
+                DecimalNumber memory _totalDebtWETH = fixedDiv(_totalDebtUSD, getAssetPrice(weth));
+                pool.flashLoanSimple(address(this), address(weth), _totalDebtWETH.number, "", 0);
+                debtStatus = DebtStatus.Stables;
+                (
                     _totalCollateralUSD,
                     _totalDebtUSD,
-                    MAX_BORROW
-                );
+                    _availableBorrowsUSD,
+                    ,
+                    ,
+                    _health
+                ) = getUserDetails(address(this));
+            }
 
+            DecimalNumber memory _newLoanUSD = calcNewLoan(
+                _totalCollateralUSD,
+                _totalDebtUSD,
+                MAX_BORROW
+            );
+
+            // AKA only run if a dollar or more can be borrowed
+            if (_newLoanUSD.number >= 1 ether) {
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
                 DecimalNumber memory _borrowAmountUSDC = truncate(
                     fixedDiv(_newLoanUSD, _usdcPriceUSD),
                     6
                 );
 
-                pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
+                console.log("NEW LOAN %s", _borrowAmountUSDC.number);
 
+                pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
                 executePayouts();
             }
         } else if (_health.number <= LOW_HEALTH_THRESHOLD) {
             /*
              * Converts usdc debt into weth debt.
              * See executeOperation() below.
-             * need to borrow (totalDebt + flashloan fee + uniswapfee + uniswapslippage)
              */
             if (debtStatus == DebtStatus.Stables) {
                 DecimalNumber memory _totalDebtUSDC = truncate(

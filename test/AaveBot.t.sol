@@ -292,6 +292,7 @@ contract AaveBotTest is Test, AaveHelper {
 
     function test_redeem() public {
         test_deposit();
+        console.log("DEPOSIT COMPLETE");
 
         uint256 _vaultShares = bot.balanceOf(address(this));
 
