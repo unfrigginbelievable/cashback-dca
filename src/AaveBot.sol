@@ -4,14 +4,12 @@ pragma solidity ^0.8.0;
 import "./AaveHelper.sol";
 import "./ERC4626.sol";
 import "forge-std/console.sol";
-// import "@solmate/mixins/ERC4626.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/flashloan/interfaces/IFlashLoanSimpleReceiver.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import "prb-math/contracts/PRBMathUD60x18.sol";
 
 error Strategy__DepositIsZero();
 error Strategy__WethTransferFailed();
@@ -25,6 +23,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
     uint256 public constant LOW_HEALTH_THRESHOLD = 1.05 ether;
+    uint256 public constant MIN_BORROW_AMOUNT = 1 ether;
 
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
@@ -121,15 +120,13 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 MAX_BORROW
             );
 
-            // AKA only run if a dollar or more can be borrowed
-            if (_newLoanUSD.number >= 1 ether) {
+            // AKA only run if 1 USDC or more can be borrowed
+            if (_newLoanUSD.number >= MIN_BORROW_AMOUNT) {
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
                 DecimalNumber memory _borrowAmountUSDC = truncate(
                     fixedDiv(_newLoanUSD, _usdcPriceUSD),
                     6
                 );
-
-                console.log("NEW LOAN %s", _borrowAmountUSDC.number);
 
                 pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
                 executePayouts();
@@ -153,20 +150,26 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     function executePayouts() internal {
         uint256 _payoutPool = usdc.balanceOf(address(this));
         for (uint256 i = 0; i < depositors.length; i++) {
-            uint256 _userShares = this.balanceOf(depositors[i]);
+            DecimalNumber memory _userShares = getBalanceOf(
+                IERC20Metadata(address(this)),
+                depositors[i]
+            );
             uint256 _usdcOwed = usdcAmountOwed[depositors[i]];
 
             // Remove the depositor if they no longer are owed any money and have no stake in vault
-            if (_userShares == 0 && _usdcOwed == 0) {
-                console.log("Removing %s", depositors[i]);
+            if (_userShares.number == 0 && _usdcOwed == 0) {
                 removeDepositor(depositors[i]);
                 continue;
             }
 
-            uint256 _sharePercentage = PRBMathUD60x18.div(_userShares, this.totalSupply());
+            DecimalNumber memory _sharePercentage = fixedDiv(
+                _userShares,
+                DecimalNumber({number: this.totalSupply(), decimals: asset.decimals()})
+            );
+
             uint256 _depositorPayout = Math.min(
                 _usdcOwed,
-                PRBMathUD60x18.mul(_payoutPool, _sharePercentage)
+                fixedMul(DecimalNumber(_payoutPool, asset.decimals()), _sharePercentage).number
             );
 
             usdcAmountOwed[depositors[i]] -= _depositorPayout;
@@ -193,15 +196,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     }
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
-        /*
-         * TODO: Remove previous withdraws from assets
-         * Use "untracked" weth to pay off debts (but how to track)
-         */
-        console.log("Assets requested %s", assets);
-        console.log("Withdraw requested by %s", msg.sender);
         usdcAmountOwed[msg.sender] += (assets - usdcAmountPaid[msg.sender]);
         main();
-        console.log("Before Withdraw done");
     }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
