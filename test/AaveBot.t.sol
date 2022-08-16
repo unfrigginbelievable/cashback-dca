@@ -47,6 +47,41 @@ contract AaveBotTest is Test, AaveHelper {
         oracle = IPriceOracle(bot.oracle());
     }
 
+    /**
+      @dev calculates how much weth and usdc out required to get _wethAmount from trade
+      @dev only used for testing
+     */
+    function calcWethAmountToUSDCTrade(uint256 _wethAmount)
+        internal
+        returns (DecimalNumber memory, DecimalNumber memory)
+    {
+        // Fee must be added TWICE. Once for fees to swap from weth->usdc before deposit.
+        // Again for fees to swap usdc->weth after deposit.
+        DecimalNumber memory _feeMultiplier = fixedAdd(
+            DecimalNumber({number: 1 ether, decimals: 18}),
+            fixedAdd(UNI_POOL_FEE, MAX_SLIPPAGE)
+        );
+
+        DecimalNumber memory _wethAmountDec = DecimalNumber({number: _wethAmount, decimals: 18});
+        DecimalNumber memory _wethInAmount = fixedMul(
+            fixedAdd(
+                _wethAmountDec,
+                fixedAdd(
+                    fixedMul(_wethAmountDec, UNI_POOL_FEE),
+                    fixedMul(_wethAmountDec, MAX_SLIPPAGE)
+                )
+            ),
+            _feeMultiplier
+        );
+
+        DecimalNumber memory _minUSDCOut = removePrecision(
+            fixedMul(convertPriceDenomination(weth, usdc, _wethAmountDec), _feeMultiplier),
+            6
+        );
+
+        return (_wethInAmount, _minUSDCOut);
+    }
+
     function test_Constructor() public {
         assertEq(uint256(bot.debtStatus()), 0);
     }
@@ -63,29 +98,21 @@ contract AaveBotTest is Test, AaveHelper {
          */
 
         // Get enough WETH that we can swap for exactly 1 WETH worth of USDC
-        address(weth).call{value: wethAmount * 2}("");
+        (
+            DecimalNumber memory _wethTradeAmount,
+            DecimalNumber memory _minUSDCOut
+        ) = calcWethAmountToUSDCTrade(wethAmount);
 
-        DecimalNumber memory _wethTradeAmount = DecimalNumber({number: wethAmount, decimals: 18});
-        _wethTradeAmount = fixedAdd(
-            _wethTradeAmount,
-            fixedAdd(
-                fixedMul(_wethTradeAmount, UNI_POOL_FEE),
-                fixedMul(_wethTradeAmount, MAX_SLIPPAGE)
-            )
-        );
-
-        DecimalNumber memory _minUSDCOut = removePrecision(
-            convertPriceDenomination(weth, usdc, _wethTradeAmount),
-            6
-        );
-
+        address(weth).call{value: _wethTradeAmount.number}("");
         swapAssetsExactOutput(weth, usdc, _minUSDCOut);
-
-        usdc.approve(address(bot), _minUSDCOut.number);
-        bot.deposit(_minUSDCOut.number, address(this));
 
         DecimalNumber memory _usdcPrice = getAssetPrice(usdc);
         DecimalNumber memory _wethPrice = getAssetPrice(weth);
+
+        /// @note the swap does work correctly
+
+        usdc.approve(address(bot), _minUSDCOut.number);
+        bot.deposit(_minUSDCOut.number, address(this));
 
         (
             DecimalNumber memory _depositsUSD,
@@ -140,22 +167,40 @@ contract AaveBotTest is Test, AaveHelper {
         );
     }
 
+    /**
+     * @dev Ensure bot swaps debt to WETH when health below threshold
+     */
     function test_lowHealth() public {
+        // TODO: Ensure debt is actually represented in ETH
         test_deposit();
 
         // Get bot health very low
         vm.prank(address(bot));
         pool.borrow(address(usdc), 64000000, 1, 0, address(bot));
 
+        (
+            DecimalNumber memory _depositsUSD,
+            DecimalNumber memory _borrowsUSD,
+            ,
+            ,
+            ,
+            DecimalNumber memory _health
+        ) = getUserDetails(address(bot));
+
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+
+        assertLt(_health.number, bot.LOW_HEALTH_THRESHOLD());
 
         bot.main();
 
         assertEq(uint256(bot.debtStatus()), 1);
     }
 
+    /**
+     * @dev Ensure bot ability to swap debt weth->usdc when health above threshold
+     */
     function test_RepayWethDebt() public {
         // get bot into low health state
         test_lowHealth();
@@ -166,9 +211,16 @@ contract AaveBotTest is Test, AaveHelper {
         vm.roll(block.number + 1);
 
         // deposit enough weth to get bot back above low health thresh
-        address(weth).call{value: wethAmount}("");
-        weth.approve(address(bot), wethAmount);
-        bot.deposit(wethAmount, address(this));
+        (
+            DecimalNumber memory _wethTradeAmount,
+            DecimalNumber memory _minUSDCOut
+        ) = calcWethAmountToUSDCTrade(wethAmount);
+
+        address(weth).call{value: _wethTradeAmount.number}("");
+        swapAssetsExactOutput(weth, usdc, _minUSDCOut);
+        usdc.approve(address(bot), _minUSDCOut.number);
+
+        bot.deposit(_minUSDCOut.number, address(this));
 
         //assert health is up AND debt is usdc again
         (uint256 _collat, uint256 _debt, , , , uint256 health) = pool.getUserAccountData(

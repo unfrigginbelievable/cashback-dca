@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "./AaveHelper.sol";
-
+import "forge-std/console.sol";
 import "@solmate/mixins/ERC4626.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
@@ -163,33 +163,38 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     /* ================================================================
                             ERC4626 METHODS
        ================================================================ */
-
+    /**
+     * @dev Cannot return 0. Breaks deposits
+     */
     function totalAssets() public view override returns (uint256) {
         // TODO: Should this be multiplied by max borrow?
+        // TODO: Should calc be (deposits * 0.75) - borrows?
         /*
          * availableBorrows / usdcPrice
          */
         (
-            ,
-            ,
+            DecimalNumber memory _depositsUSD,
+            DecimalNumber memory _borrowsUSD,
             DecimalNumber memory _availableBorrowsUSD,
             ,
             ,
-            DecimalNumber memory _health
-        ) = getUserDetails(address(this));
 
-        if (_health.number <= LOW_HEALTH_THRESHOLD) {
-            return 0;
-        } else {
-            DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
-            DecimalNumber memory _availableUSDC = fixedDiv(_availableBorrowsUSD, _usdcPriceUSD);
-            return _availableUSDC.number;
-        }
+        ) = getUserDetails(address(this));
+        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+        DecimalNumber memory _availableUSDC = removePrecision(
+            fixedDiv(_availableBorrowsUSD, _usdcPriceUSD),
+            asset.decimals()
+        );
+        // DecimalNumber memory _availableUSDC = removePrecision(
+        //     fixedSub(fixedMul(_depositsUSD, MAX_BORROW), _borrowsUSD),
+        //     asset.decimals()
+        // );
+        return _availableUSDC.number;
     }
 
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
         // TODO: Implementation
-        // TODO: Do assets need to be subracted from users pending payouts, or added?
+        // TODO: This probably shouldn't result in an insta borrow tbh
         /*
          * The amount of assets passed in will scale based on health of the vault.
          * If vault health < low threhold, the assets should be zero.
@@ -199,8 +204,10 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
          */
         DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
         (DecimalNumber memory _depositsUSD, , , , , ) = getUserDetails(address(this));
-        usdcAmountOwed[msg.sender] += assets;
-        main();
+        console.log("Assets requested %s", assets);
+        pool.borrow(address(usdc), assets, 1, 0, address(this));
+        // main();
+        console.log("Withdraw done");
     }
 
     function afterDeposit(uint256 assets, uint256 shares) internal override {
@@ -208,7 +215,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         usdcAmountOwed[msg.sender] += assets;
 
         DecimalNumber memory _decAssets = addPrecision(
-            DecimalNumber({number: assets, decimals: asset.decimals()}),
+            DecimalNumber({number: assets / 1e12, decimals: asset.decimals()}),
             18
         );
 
@@ -219,8 +226,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             UNI_POOL_FEE,
             MAX_SLIPPAGE
         );
-        swapAssetsExactInput(usdc, weth, _wethOut);
 
+        swapAssetsExactInput(usdc, weth, _wethOut);
         main();
     }
 
