@@ -74,7 +74,7 @@ contract AaveBotTest is Test, AaveHelper {
             _feeMultiplier
         );
 
-        DecimalNumber memory _minUSDCOut = removePrecision(
+        DecimalNumber memory _minUSDCOut = truncate(
             fixedMul(convertPriceDenomination(weth, usdc, _wethAmountDec), _feeMultiplier),
             6
         );
@@ -95,6 +95,8 @@ contract AaveBotTest is Test, AaveHelper {
          * Test amount of usdc borrowed from aave
          * Test amount of usdc owed back to this contract
          * Test amount borrowed not > max borrowed percent
+         * Test amount owed <= (initial deposit * 0.25)
+         * Test paid tracking = amount in this contract
          */
 
         // Get enough WETH that we can swap for exactly 1 WETH worth of USDC
@@ -124,7 +126,7 @@ contract AaveBotTest is Test, AaveHelper {
         ) = getUserDetails(address(bot));
 
         DecimalNumber memory _depositsWETH = fixedDiv(_depositsUSD, _wethPrice);
-        DecimalNumber memory _borrowsUSDC = removePrecision(fixedDiv(_borrowsUSD, _usdcPrice), 6);
+        DecimalNumber memory _borrowsUSDC = truncate(fixedDiv(_borrowsUSD, _usdcPrice), 6);
 
         (uint256 _borrowPercent, uint256 _borrowDecimals) = bot.MAX_BORROW();
         DecimalNumber memory _maxBorrowPercent = DecimalNumber({
@@ -133,7 +135,7 @@ contract AaveBotTest is Test, AaveHelper {
         });
 
         // (usdcIn - (UNI_FEE + Slippage)) * Max Borrow Percent
-        DecimalNumber memory _expectedBorrowsUSDC = removePrecision(
+        DecimalNumber memory _expectedBorrowsUSDC = truncate(
             fixedMul(
                 fixedSub(
                     addPrecision(_minUSDCOut, 18),
@@ -144,6 +146,15 @@ contract AaveBotTest is Test, AaveHelper {
                 ),
                 _maxBorrowPercent
             ),
+            6
+        );
+
+        DecimalNumber memory _expectedOwedPercent = DecimalNumber({
+            number: 1 ether - _borrowPercent,
+            decimals: 18
+        });
+        DecimalNumber memory _expectedOwedUSDC = truncate(
+            fixedMul(addPrecision(_minUSDCOut, 18), _expectedOwedPercent),
             6
         );
 
@@ -164,6 +175,17 @@ contract AaveBotTest is Test, AaveHelper {
             _borrowsUSD.number,
             fixedMul(_depositsUSD, _maxBorrowPercent).number,
             "Borrowed more than expected"
+        );
+        assertApproxEqRel(
+            bot.usdcAmountOwed(address(this)),
+            _expectedOwedUSDC.number,
+            0.01 ether,
+            "Expected owed USDC does not match"
+        );
+        assertEq(
+            bot.usdcAmountPaid(address(this)),
+            usdc.balanceOf(address(this)),
+            "Amount paid tracking does not match expected"
         );
     }
 
@@ -204,6 +226,7 @@ contract AaveBotTest is Test, AaveHelper {
     function test_RepayWethDebt() public {
         // get bot into low health state
         test_lowHealth();
+
         assertEq(uint256(bot.debtStatus()), 1);
 
         // AAVE does not allow borrow and repay in same block
@@ -232,64 +255,39 @@ contract AaveBotTest is Test, AaveHelper {
     }
 
     /**
-        @dev tests the totalAssets after a borrow to the pool max limit is made
+     * @dev tests totalAssets calculation
      */
-    function test_TotalAssets() public {
-        test_deposit();
-
-        // AAVE does not allow borrow and repay in same block
-        vm.warp(block.timestamp + 1);
-        vm.roll(block.number + 1);
-
-        uint256 _vaultShares = bot.balanceOf(address(this));
-
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
-        (uint256 depositsUSD, uint256 _borrowsUSD, uint256 _availableBorrowsUSD, , , ) = pool
-            .getUserAccountData(address(bot));
-        uint256 _maxBorrow = PRBMathUD60x18.mul(depositsUSD, 0.8 ether);
-        uint256 _newBorrowUSD = _maxBorrow - _borrowsUSD;
-        uint256 _newBorrowUSDC = PRBMathUD60x18.div(_newBorrowUSD, _usdcPriceUSD.number) / 1e2;
-
-        vm.prank(address(bot));
-        pool.borrow(address(usdc), _newBorrowUSDC, 1, 0, address(bot));
-
-        (, , _availableBorrowsUSD, , , ) = pool.getUserAccountData(address(bot));
-
-        // this should equal 0, or at least close
-        DecimalNumber memory _availableWETH = DecimalNumber({
-            number: bot.convertToAssets(_vaultShares),
-            decimals: 18
-        });
-
-        uint256 _resultUSD = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
-
-        assertApproxEqRel(_resultUSD, _availableBorrowsUSD, 0.034 ether);
-    }
-
-    /**
-        @dev tests the totalAssets after a standard deposit
-     */
-    function test_TotalAssets2() public {
-        test_deposit();
-
-        uint256 _vaultShares = bot.balanceOf(address(this));
-        DecimalNumber memory _wethPriceUSD = getAssetPrice(weth);
-        (, , uint256 _availableBorrowsUSD, , , ) = pool.getUserAccountData(address(bot));
-
-        DecimalNumber memory _availableWETH = DecimalNumber({
-            number: bot.convertToAssets(_vaultShares),
-            decimals: 18
-        });
-        uint256 _result = removePrecision(fixedMul(_availableWETH, _wethPriceUSD), 8).number;
-
-        assertApproxEqRel(_availableBorrowsUSD, _result, 0.0001 ether);
-    }
-
-    function test_totalAssets3() public {
+    function test_totalAssets() public {
         uint256 _result = bot.totalAssets();
         assertEq(_result, 0);
+
         test_deposit();
+
+        // (availableBorrows * 0.75) / usdcPriceUSD
+
+        // DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
+        DecimalNumber memory _maxBorrow = DecimalNumber({number: 0.75 ether, decimals: 18});
+        // (DecimalNumber memory _depositsUSD, , , , , ) = getUserDetails(address(bot));
+
+        uint256 _totalAssetsActual = bot.totalAssets();
+
+        // DecimalNumber memory _totalAssetsExpected = fixedDiv(
+        //     fixedMul(_depositsUSD, _maxBorrow),
+        //     _usdcPriceUSD
+        // );
+
+        DecimalNumber memory _totalUSDCDeposits = convertPriceDenomination(
+            weth,
+            usdc,
+            DecimalNumber({number: wethAmount, decimals: 18})
+        );
+        DecimalNumber memory _totalAssetsExpected = fixedMul(_totalUSDCDeposits, _maxBorrow);
+        assertApproxEqRel(
+            _totalAssetsActual,
+            truncate(_totalAssetsExpected, 6).number,
+            0.02 ether,
+            "Total assets does not match expected"
+        );
     }
 
     function test_redeem() public {
@@ -299,27 +297,36 @@ contract AaveBotTest is Test, AaveHelper {
 
         bot.redeem(_vaultShares, address(this), address(this));
 
-        (, , uint256 _availableBorrowsUSD, , , uint256 _health) = pool.getUserAccountData(
-            address(bot)
-        );
-
-        uint256 _minExpectedWETH = PRBMathUD60x18.mul(wethAmount, 0.8 ether);
+        DecimalNumber memory _minExpectedWETH = DecimalNumber({
+            number: PRBMathUD60x18.mul(wethAmount, 0.75 ether),
+            decimals: 18
+        });
+        DecimalNumber memory _maxExpectedRemainingWETH = DecimalNumber({
+            number: PRBMathUD60x18.mul(wethAmount, 0.25 ether),
+            decimals: 18
+        });
         DecimalNumber memory _usdcBalance = addPrecision(getBalanceOf(usdc, address(this)), 18);
-        DecimalNumber memory _usdcAsWETH = convertPriceDenomination(usdc, weth, _usdcBalance);
-        uint256 result = weth.balanceOf(address(this)) + _usdcAsWETH.number;
-
-        assertApproxEqRel(
-            weth.balanceOf(address(this)) + _usdcAsWETH.number,
-            _minExpectedWETH,
-            0.001 ether
+        DecimalNumber memory _expectedPaidUSDC = convertPriceDenomination(
+            weth,
+            usdc,
+            _minExpectedWETH
+        );
+        DecimalNumber memory _expectedRemainingUSDC = convertPriceDenomination(
+            weth,
+            usdc,
+            _maxExpectedRemainingWETH
+        );
+        DecimalNumber memory _actualRemainingUSDC = addPrecision(
+            DecimalNumber({number: bot.usdcAmountOwed(address(this)), decimals: usdc.decimals()}),
+            18
         );
 
-        assertEq(bot.usdcAmountOwed(address(this)), 0);
-
-        console.log(_health);
-
-        bot.main();
-
-        console.log(uint256(bot.debtStatus()));
+        assertGe(_usdcBalance.number, _expectedPaidUSDC.number, "Expected payout does not match");
+        assertApproxEqRel(
+            _actualRemainingUSDC.number,
+            _expectedRemainingUSDC.number,
+            0.02 ether,
+            "Expected remaining payout does not match"
+        );
     }
 }

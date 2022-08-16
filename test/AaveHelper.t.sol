@@ -176,7 +176,7 @@ contract AaveHelperTest is Test, AaveHelper {
 
         assertGt(
             dai.balanceOf(address(this)),
-            removePrecision(_expectedBorrowedDAI, dai.decimals()).number
+            truncate(_expectedBorrowedDAI, dai.decimals()).number
         );
     }
 
@@ -202,7 +202,7 @@ contract AaveHelperTest is Test, AaveHelper {
 
         assertGt(
             usdc.balanceOf(address(this)),
-            removePrecision(_expectedBorrowedUSDC, usdc.decimals()).number
+            truncate(_expectedBorrowedUSDC, usdc.decimals()).number
         );
     }
 
@@ -279,7 +279,7 @@ contract AaveHelperTest is Test, AaveHelper {
             decimals: 18
         });
 
-        DecimalNumber memory _minBack = removePrecision(
+        DecimalNumber memory _minBack = truncate(
             calculateSwapOutAmount(weth, usdc, wethAmountBeforeSwap, UNI_POOL_FEE, MAX_SLIPPAGE),
             6
         );

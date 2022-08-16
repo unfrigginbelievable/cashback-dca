@@ -151,7 +151,7 @@ contract AaveHelper {
 
         pool.borrow(
             address(_newDebtAsset),
-            removePrecision(_newLoanAmount, _newDebtAsset.decimals()).number,
+            truncate(_newLoanAmount, _newDebtAsset.decimals()).number,
             _borrowRateType,
             0,
             address(this)
@@ -287,7 +287,7 @@ contract AaveHelper {
         swapAssetsExactOutput(
             _newDebtAsset,
             _oldDebtAsset,
-            removePrecision(_paybackAmountInOldDebtAsset, _oldDebtAsset.decimals())
+            truncate(_paybackAmountInOldDebtAsset, _oldDebtAsset.decimals())
         );
     }
 
@@ -317,7 +317,7 @@ contract AaveHelper {
         return DecimalNumber({number: _x.number / 1e12, decimals: 6});
     }
 
-    function removePrecision(DecimalNumber memory _x, uint256 _convertTo)
+    function truncate(DecimalNumber memory _x, uint256 _convertTo)
         internal
         view
         returns (DecimalNumber memory)
