@@ -1,8 +1,8 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./AaveHelper.sol";
 import "./ERC4626.sol";
+import "./AaveHelper.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
@@ -27,6 +27,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
     mapping(address => uint256) public usdcAmountPaid;
+    mapping(address => uint256) public wethAmountDeposited;
 
     DebtStatus public debtStatus;
     IERC20Metadata public immutable weth;
@@ -146,6 +147,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
             // Remove the depositor if they no longer are owed any money and have no stake in vault
             if (_userShares.number == 0 && _usdcOwed == 0) {
+                // TODO: Pay off this depositor's debt using a flashloan
                 removeDepositor(depositors[i]);
                 continue;
             }
@@ -205,7 +207,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             MAX_SLIPPAGE
         );
 
-        swapAssetsExactInput(usdc, weth, _wethOut);
+        uint256 _wethDeposited = swapAssetsExactInput(usdc, weth, _wethOut);
+        wethAmountDeposited[msg.sender] += _wethDeposited;
         main();
     }
 

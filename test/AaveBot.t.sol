@@ -97,6 +97,7 @@ contract AaveBotTest is Test, AaveHelper {
          * Test amount borrowed not > max borrowed percent
          * Test amount owed <= (initial deposit * 0.25)
          * Test paid tracking = amount in this contract
+         * Test deposited weth credited to this contrace = amount deposited
          */
 
         // Get enough WETH that we can swap for exactly 1 WETH worth of USDC
@@ -186,6 +187,12 @@ contract AaveBotTest is Test, AaveHelper {
             bot.usdcAmountPaid(address(this)),
             usdc.balanceOf(address(this)),
             "Amount paid tracking does not match expected"
+        );
+        assertApproxEqRel(
+            bot.wethAmountDeposited(address(this)),
+            wethAmount,
+            0.02 ether,
+            "WETH credited does not match expected"
         );
     }
 
