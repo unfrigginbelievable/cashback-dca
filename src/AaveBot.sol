@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "./AaveHelper.sol";
 import "./ERC4626.sol";
-import "forge-std/console.sol";
 import "aave/contracts/interfaces/IPool.sol";
 import "aave/contracts/interfaces/IPriceOracle.sol";
 import "aave/contracts/interfaces/IPoolAddressesProvider.sol";
