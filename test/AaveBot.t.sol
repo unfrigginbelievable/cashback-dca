@@ -1,38 +1,26 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "forge-std/Test.sol";
+import "./TestUtils.sol";
 
 import "aave/contracts/interfaces/IPool.sol";
-import "aave/contracts/interfaces/IPriceOracle.sol";
 import "prb-math/contracts/PRBMathUD60x18.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "aave/contracts/protocol/libraries/types/DataTypes.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import "src/AaveBot.sol";
 import "src/AaveHelper.sol";
 
-contract AaveBotTest is Test, AaveHelper {
+contract AaveBotTest is TestUtils {
     AaveBot public bot;
-    IERC20Metadata public weth;
     IERC20Metadata public usdc;
-    AggregatorV3Interface public chainlink;
     uint256 public wethAmount = 1 ether;
 
-    string public ARBITRUM_RPC_URL = vm.envString("ALCHEMY_WEB_URL");
-
     function setUp() public {
-        vm.chainId(31337);
+        setChain();
 
-        uint256 forkId = vm.createFork(ARBITRUM_RPC_URL, 19227458);
-        vm.selectFork(forkId);
-
-        weth = IERC20Metadata(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
         usdc = IERC20Metadata(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
         router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
-        chainlink = AggregatorV3Interface(0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612);
 
         bot = new AaveBot(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
@@ -345,10 +333,22 @@ contract AaveBotTest is Test, AaveHelper {
         uint256 _amountOwed = bot.usdcAmountOwed(address(this));
         console.log("Amount USDC owed %s", _amountOwed);
 
-        // Deposit weth to pool. Makes health go up. Allows depositer to be totally paid out.
-        address(weth).call{value: wethAmount}("");
-        weth.transfer(address(bot), wethAmount);
+        (, , , , , DecimalNumber memory _health) = getUserDetails(address(bot));
+        DecimalNumber memory oldEthPrice = getAssetPrice(weth);
+        int256 newEthPrice = int256((oldEthPrice.number / 1e10) * 2);
+        setETHUSDPrice(newEthPrice);
 
+        console.log("Old weth price %s", oldEthPrice.number);
+        console.log("New weth price %s", getAssetPrice(weth).number);
+        console.log("Old health %s", _health.number);
+        (, , , , , _health) = getUserDetails(address(bot));
+        console.log("New health %s", _health.number);
+
+        // Let the price change marinate?
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        // First loop will pay user out so their owed usdc is 0
         bot.main();
         console.log("Main loop 1 done");
         _amountOwed = bot.usdcAmountOwed(address(this));
@@ -358,6 +358,7 @@ contract AaveBotTest is Test, AaveHelper {
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
 
+        // Second loop will remove user from the bot and pay back that user's debt
         bot.main();
         console.log("Main loop 2 done");
         _amountOwed = bot.usdcAmountOwed(address(this));

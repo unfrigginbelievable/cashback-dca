@@ -107,8 +107,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 ) = getUserDetails(address(this));
             }
 
-            console.log(_totalCollateralUSD.number);
-            console.log(_totalDebtUSD.number);
+            console.log("Debosits %s", _totalCollateralUSD.number);
+            console.log("Borrows %s", _totalDebtUSD.number);
             DecimalNumber memory _newLoanUSD = calcNewLoan(
                 _totalCollateralUSD,
                 _totalDebtUSD,
@@ -149,11 +149,11 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     }
 
     function namingThingsIsHard() internal {
-        console.log("Removing user & their debt");
         // Remove the depositor if they no longer are owed any money and requested payout
         for (uint256 i = 0; i < depositors.length; i++) {
             uint256 _usdcOwed = usdcAmountOwed[depositors[i]];
             if (requestedPayout[depositors[i]] && _usdcOwed == 0) {
+                console.log("Removing user & their debt");
                 DecimalNumber memory _userShares = getBalanceOf(
                     IERC20Metadata(address(this)),
                     depositors[i]
@@ -278,12 +278,21 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         }
 
         if (params.length > 0) {
-            console.log("Repaying user's debt");
+            console.log("Repaying user's debt in flashloan");
             address _depositor = abi.decode(params, (address));
             uint256 _freeWETH = wethAmountDeposited[_depositor];
 
+            (, uint256 _borrows, , , , uint256 _health) = pool.getUserAccountData(address(this));
+            console.log("Flashloan health %s", _health);
+            console.log("Borrows %s", _borrows);
+
             usdc.approve(address(pool), amount);
             pool.repay(address(asset), amount, 1, address(this));
+
+            (, _borrows, , , , _health) = pool.getUserAccountData(address(this));
+            console.log("Flashloan health %s", _health);
+            console.log("Borrows %s", _borrows);
+            console.log("===========GOT HERE============");
             pool.withdraw(address(weth), _freeWETH, address(this));
 
             console.log("User weth %s", _freeWETH);
