@@ -40,7 +40,12 @@ contract AaveHelper {
         DecimalNumber memory _borrows,
         DecimalNumber memory _loanPercentage
     ) internal pure returns (DecimalNumber memory) {
-        return fixedSub(fixedMul(_deposits, _loanPercentage), _borrows);
+        DecimalNumber memory _x = fixedMul(_deposits, _loanPercentage);
+        if (_x.number > _borrows.number) {
+            return fixedSub(_x, _borrows);
+        } else {
+            return DecimalNumber({number: 0, decimals: _deposits.decimals});
+        }
     }
 
     /// @dev get price of amount x quoted in y

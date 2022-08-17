@@ -86,7 +86,7 @@ abstract contract ERC4626 is ERC20 {
 
         beforeWithdraw(assets, shares);
 
-        _burn(owner, shares);
+        // _burn(owner, shares);
 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
 
@@ -110,7 +110,7 @@ abstract contract ERC4626 is ERC20 {
 
         beforeWithdraw(assets, shares);
 
-        _burn(owner, shares);
+        // _burn(owner, shares);
 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
 

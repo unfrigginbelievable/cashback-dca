@@ -337,4 +337,30 @@ contract AaveBotTest is Test, AaveHelper {
             "Expected remaining payout does not match"
         );
     }
+
+    function test_payoutDepositor() public {
+        test_redeem();
+        console.log("REDEEM COMPLETE");
+
+        uint256 _amountOwed = bot.usdcAmountOwed(address(this));
+        console.log("Amount USDC owed %s", _amountOwed);
+
+        // Deposit weth to pool. Makes health go up. Allows depositer to be totally paid out.
+        address(weth).call{value: wethAmount}("");
+        weth.transfer(address(bot), wethAmount);
+
+        bot.main();
+        console.log("Main loop 1 done");
+        _amountOwed = bot.usdcAmountOwed(address(this));
+        console.log("Amount USDC owed %s", _amountOwed);
+
+        // AAVE does not allow borrow and repay in same block
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        bot.main();
+        console.log("Main loop 2 done");
+        _amountOwed = bot.usdcAmountOwed(address(this));
+        console.log("Amount USDC owed %s", _amountOwed);
+    }
 }
