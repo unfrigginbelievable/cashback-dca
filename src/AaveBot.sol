@@ -147,7 +147,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
             // Remove the depositor if they no longer are owed any money and have no stake in vault
             if (_userShares.number == 0 && _usdcOwed == 0) {
-                // TODO: Pay off this depositor's debt using a flashloan
+                repayDepositorDebt(depositors[i]);
                 removeDepositor(depositors[i]);
                 continue;
             }
@@ -166,6 +166,16 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             usdcAmountPaid[depositors[i]] += _depositorPayout;
             usdc.transfer(depositors[i], _depositorPayout);
         }
+    }
+
+    function repayDepositorDebt(address _depositor) internal {
+        pool.flashLoanSimple(
+            address(this),
+            address(usdc),
+            usdcAmountPaid[_depositor],
+            abi.encodePacked(_depositor),
+            0
+        );
     }
 
     /* ================================================================
@@ -234,49 +244,64 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             revert Strategy__InitiatorNotContract();
         }
 
-        if (debtStatus == DebtStatus.Stables) {
-            DecimalNumber memory _paybackAmountInWei = addPrecision(
-                DecimalNumber({
-                    number: amount + premium,
-                    decimals: IERC20Metadata(asset).decimals()
-                }),
-                18
-            );
+        if (params.length > 0) {
+            address _depositor = abi.decode(params, (address));
+            uint256 _freeWETH = wethAmountDeposited[_depositor];
 
-            // swap borrowed eth to usdc
-            // swapDebt does all the calculations for me lol
-            uint256 _wethUsed = swapDebt(usdc, weth, _paybackAmountInWei, 1, 2);
+            pool.repay(address(asset), amount, 1, address(this));
+            pool.withdraw(address(weth), _freeWETH, address(this));
 
-            DecimalNumber memory _leftOverWeth = getBalanceOf(weth, address(this));
-            // TODO: Pay back unused weth
-            // if (_leftOverWeth.number > 0) {
-            //     weth.approve(address(pool), _leftOverWeth.number);
-            //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
-            // }
+            DecimalNumber memory _usdcOutAmount = DecimalNumber({
+                number: amount + premium,
+                decimals: IERC20Metadata(asset).decimals()
+            });
+            uint256 _leftOverWeth = swapAssetsExactOutput(weth, usdc, _usdcOutAmount);
+            // TODO: Tf I do with the leftover weth brah?
+        } else {
+            if (debtStatus == DebtStatus.Stables) {
+                DecimalNumber memory _paybackAmountInWei = addPrecision(
+                    DecimalNumber({
+                        number: amount + premium,
+                        decimals: IERC20Metadata(asset).decimals()
+                    }),
+                    18
+                );
 
-            // Ensure pool can transfer back borrowed asset
-            usdc.approve(address(pool), truncate(getBalanceOf(usdc, address(this)), 6).number);
-        } else if (debtStatus == DebtStatus.weth) {
-            // TODO: Swap from weth debt to usdc debt
-            DecimalNumber memory _paybackAmountInWei = addPrecision(
-                DecimalNumber({
-                    number: amount + premium,
-                    decimals: IERC20Metadata(asset).decimals()
-                }),
-                18
-            );
+                // swap borrowed eth to usdc
+                // swapDebt does all the calculations for me lol
+                uint256 _wethUsed = swapDebt(usdc, weth, _paybackAmountInWei, 1, 2);
 
-            uint256 _wethUsed = swapDebt(weth, usdc, _paybackAmountInWei, 2, 1);
+                DecimalNumber memory _leftOverWeth = getBalanceOf(weth, address(this));
+                // TODO: Pay back unused weth
+                // if (_leftOverWeth.number > 0) {
+                //     weth.approve(address(pool), _leftOverWeth.number);
+                //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
+                // }
 
-            DecimalNumber memory _leftOverUSDC = getBalanceOf(usdc, address(this));
-            // TODO: Pay back unused usdc
-            // if (_leftOverWeth.number > 0) {
-            //     weth.approve(address(pool), _leftOverWeth.number);
-            //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
-            // }
+                // Ensure pool can transfer back borrowed asset
+                usdc.approve(address(pool), truncate(getBalanceOf(usdc, address(this)), 6).number);
+            } else if (debtStatus == DebtStatus.weth) {
+                // TODO: Swap from weth debt to usdc debt
+                DecimalNumber memory _paybackAmountInWei = addPrecision(
+                    DecimalNumber({
+                        number: amount + premium,
+                        decimals: IERC20Metadata(asset).decimals()
+                    }),
+                    18
+                );
 
-            // Ensure pool can transfer back borrowed asset
-            weth.approve(address(pool), getBalanceOf(weth, address(this)).number);
+                uint256 _wethUsed = swapDebt(weth, usdc, _paybackAmountInWei, 2, 1);
+
+                DecimalNumber memory _leftOverUSDC = getBalanceOf(usdc, address(this));
+                // TODO: Pay back unused usdc
+                // if (_leftOverWeth.number > 0) {
+                //     weth.approve(address(pool), _leftOverWeth.number);
+                //     pool.repay(address(weth), _leftOverWeth.number, 2, address(this));
+                // }
+
+                // Ensure pool can transfer back borrowed asset
+                weth.approve(address(pool), getBalanceOf(weth, address(this)).number);
+            }
         }
 
         return true;

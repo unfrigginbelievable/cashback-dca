@@ -198,6 +198,9 @@ contract AaveHelper {
         });
     }
 
+    /**
+     * @dev calcs how much assetOut a trade you get from an amount of assetIn
+     */
     function calculateSwapOutAmount(
         IERC20Metadata _inAsset,
         IERC20Metadata _outAsset,
