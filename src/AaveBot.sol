@@ -296,7 +296,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
 
             console.log(
                 "WETH as USDC %s",
-                convertPriceDenomination(weth, usdc, DecimalNumber(_freeWETH, 18)).number
+                truncate(convertPriceDenomination(weth, usdc, DecimalNumber(_freeWETH, 18)), 6)
+                    .number
             );
             console.log("USDC Owed %s", _usdcOutAmount.number);
             uint256 _leftOverWeth = swapAssetsExactOutput(weth, usdc, _usdcOutAmount);
