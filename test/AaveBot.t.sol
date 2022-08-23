@@ -13,14 +13,10 @@ import "src/AaveHelper.sol";
 
 contract AaveBotTest is TestUtils {
     AaveBot public bot;
-    IERC20Metadata public usdc;
     uint256 public wethAmount = 1 ether;
 
     function setUp() public {
         setChain();
-
-        usdc = IERC20Metadata(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
-        router = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
         bot = new AaveBot(
             0xa97684ead0e402dC232d5A977953DF7ECBaB3CDb,
@@ -288,6 +284,7 @@ contract AaveBotTest is TestUtils {
     function test_redeem() public {
         test_deposit();
         console.log("DEPOSIT COMPLETE");
+        console.log("STARTING_REDEEM");
 
         uint256 _vaultShares = bot.balanceOf(address(this));
 
@@ -329,6 +326,7 @@ contract AaveBotTest is TestUtils {
     function test_payoutDepositor() public {
         test_redeem();
         console.log("REDEEM COMPLETE");
+        console.log("STARTING PAYOUT");
 
         uint256 _amountOwed = bot.usdcAmountOwed(address(this));
         console.log("Amount USDC owed %s", _amountOwed);
@@ -353,6 +351,7 @@ contract AaveBotTest is TestUtils {
         console.log("Main loop 1 done");
         _amountOwed = bot.usdcAmountOwed(address(this));
         console.log("Amount USDC owed %s", _amountOwed);
+        console.log("Total USDC owed %s", bot.totalUSDCOwed());
 
         // AAVE does not allow borrow and repay in same block
         vm.warp(block.timestamp + 1);

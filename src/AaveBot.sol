@@ -24,6 +24,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     DecimalNumber public MAX_BORROW = DecimalNumber({number: 7500 * 1e14, decimals: 18});
     uint256 public constant LOW_HEALTH_THRESHOLD = 1.05 ether;
     uint256 public constant MIN_BORROW_AMOUNT = 1 ether;
+    uint256 public totalUSDCOwed;
 
     address[] public depositors;
     mapping(address => uint256) public usdcAmountOwed;
@@ -107,25 +108,25 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 ) = getUserDetails(address(this));
             }
 
-            console.log("Debosits %s", _totalCollateralUSD.number);
+            console.log("Deposits %s", _totalCollateralUSD.number);
             console.log("Borrows %s", _totalDebtUSD.number);
             DecimalNumber memory _newLoanUSD = calcNewLoan(
                 _totalCollateralUSD,
                 _totalDebtUSD,
                 MAX_BORROW
             );
-            console.log("HUH");
 
             // AKA only run if 1 USDC or more can be borrowed
-            if (_newLoanUSD.number >= MIN_BORROW_AMOUNT) {
-                console.log("Borrowing %s", _newLoanUSD.number);
+            // TODO: Only borrow if someone needs payout
+            if ((_newLoanUSD.number >= MIN_BORROW_AMOUNT) && (totalUSDCOwed > 0)) {
+                console.log("Total USDC Owed %s", totalUSDCOwed);
                 DecimalNumber memory _usdcPriceUSD = getAssetPrice(usdc);
-                DecimalNumber memory _borrowAmountUSDC = truncate(
-                    fixedDiv(_newLoanUSD, _usdcPriceUSD),
-                    6
+                uint256 _borrowAmountUSDC = Math.min(
+                    truncate(fixedDiv(_newLoanUSD, _usdcPriceUSD), 6).number,
+                    totalUSDCOwed
                 );
-
-                pool.borrow(address(usdc), _borrowAmountUSDC.number, 1, 0, address(this));
+                console.log("Borrowing %s", _borrowAmountUSDC);
+                pool.borrow(address(usdc), _borrowAmountUSDC, 1, 0, address(this));
                 executePayouts();
             } else {
                 // Why here? AAVE does not allow borrows and repays in same block.
@@ -190,6 +191,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             console.log("Paying out %s", _depositorPayout);
 
             usdcAmountOwed[depositors[i]] -= _depositorPayout;
+            totalUSDCOwed -= _depositorPayout;
             usdcAmountPaid[depositors[i]] += _depositorPayout;
 
             usdc.transfer(depositors[i], _depositorPayout);
@@ -197,11 +199,14 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     }
 
     function repayDepositorDebt(address _depositor) internal {
+        (, uint256 borrowsUSD, , , , ) = pool.getUserAccountData(address(this));
         console.log("Depositor %s", _depositor);
+        console.log("Total borrows %s", borrowsUSD);
+        console.log("Flashloaning %s", usdcAmountPaid[_depositor]);
         pool.flashLoanSimple(
             address(this),
             address(usdc),
-            usdcAmountPaid[_depositor],
+            usdcAmountPaid[_depositor] + 499,
             abi.encode(_depositor),
             0
         );
@@ -227,6 +232,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
     function beforeWithdraw(uint256 assets, uint256 shares) internal override {
         console.log("REQUESTED WITHDRAW");
         usdcAmountOwed[msg.sender] += (assets - usdcAmountPaid[msg.sender]);
+        totalUSDCOwed += (assets - usdcAmountPaid[msg.sender]);
         requestedPayout[msg.sender] = true;
         main();
     }
@@ -235,6 +241,9 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
         console.log("DEPOSIT MADE");
         addDepositor(msg.sender);
         usdcAmountOwed[msg.sender] += assets;
+        totalUSDCOwed += assets;
+        console.log("USDC amount deposited %s", assets);
+        console.log("Total amount deposited %s", totalUSDCOwed);
 
         DecimalNumber memory _decAssets = addPrecision(
             DecimalNumber({number: assets / 1e12, decimals: asset.decimals()}),
@@ -292,7 +301,7 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
             (, _borrows, , , , _health) = pool.getUserAccountData(address(this));
             console.log("Flashloan health %s", _health);
             console.log("Borrows %s", _borrows);
-            console.log("===========GOT HERE============");
+
             pool.withdraw(address(weth), _freeWETH, address(this));
 
             console.log("User weth %s", _freeWETH);
@@ -308,7 +317,8 @@ contract AaveBot is AaveHelper, ERC4626, IFlashLoanSimpleReceiver {
                 truncate(convertPriceDenomination(weth, usdc, DecimalNumber(_freeWETH, 18)), 6)
                     .number
             );
-            console.log("USDC Owed %s", _usdcOutAmount.number);
+            console.log("USDC flashloan owed %s", _usdcOutAmount.number);
+            // TODO: This test wont work until the uniswap oracle reads same price as chainlink oracle
             uint256 _leftOverWeth = swapAssetsExactOutput(weth, usdc, _usdcOutAmount);
             console.log("USDC have %s", usdc.balanceOf(address(this)));
             // TODO: Tf I do with the leftover weth brah?
