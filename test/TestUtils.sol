@@ -31,6 +31,8 @@ contract TestUtils is Test, AaveHelper {
         vm.chainId(31337);
         uint256 forkId = vm.createFork(ARBITRUM_RPC_URL, 19227458);
         vm.selectFork(forkId);
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
 
         newOracle = new MockAggregator();
         newRouter = new MockSwapRouter();
@@ -53,7 +55,7 @@ contract TestUtils is Test, AaveHelper {
         vm.etch(address(router), code);
 
         // overwrite the old state vars of the router with the new vars
-        for (uint256 i = 0; i < 20; i++) {
+        for (uint256 i = 0; i < 16; i++) {
             vm.store(
                 address(router),
                 bytes32(uint256(i)),
